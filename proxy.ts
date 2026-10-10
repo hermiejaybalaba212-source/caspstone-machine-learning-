@@ -46,7 +46,7 @@ function hasValidSession(sessionValue: string | undefined): boolean {
   return expiresAt * 1000 > Date.now();
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const cookieName = getCookieName();
   const token = request.cookies.get(cookieName)?.value;

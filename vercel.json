@@ -16,7 +16,7 @@
       "root": "ml",
       "framework": "fastapi",
       "entrypoint": "service:app",
-      "buildCommand": "(uv pip uninstall -y opencv-python || python -m pip uninstall -y opencv-python); (uv pip install --no-deps opencv-python-headless || python -m pip install --no-deps opencv-python-headless)",
+      "buildCommand": "(uv pip uninstall opencv-python || python -m pip uninstall -y opencv-python); (uv pip install --no-deps opencv-python-headless || python -m pip install --no-deps opencv-python-headless)",
       "functions": {
         "service.py": {
           "maxDuration": 300,
