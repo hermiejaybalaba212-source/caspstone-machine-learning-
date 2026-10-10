@@ -94,6 +94,38 @@ export async function POST(req: Request) {
     ocr_results: Array.isArray(payload.ocr_results) ? payload.ocr_results : [],
   };
 
+  const ndjsonHeaders = {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  };
+
+  // On Vercel the pipeline runs in the internal `ml` service; ML_URL is the
+  // injected service-binding URL. Locally it stays undefined and Python runs here.
+  const mlUrl = process.env.ML_URL;
+  if (mlUrl) {
+    try {
+      const upstream = await fetch(new URL("pipeline", mlUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!upstream.ok || !upstream.body) {
+        throw new Error(`ml service responded with HTTP ${upstream.status}`);
+      }
+      return new Response(upstream.body, {
+        headers: ndjsonHeaders,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "ml service is unavailable";
+      return new Response(
+        ndjson({ type: "error", message: `ML service call failed: ${message}` }) +
+          ndjson({ type: "done", ok: false, mode: body.mode }),
+        { status: 502, headers: ndjsonHeaders },
+      );
+    }
+  }
+
   let python: { bin: string; args: string[] };
   try {
     python = resolvePython();

@@ -79,3 +79,5 @@ __pycache__/
 
 # ml artifacts (machine-generated)
 ml/models/
+.vercel
+.env*

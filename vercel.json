@@ -1,0 +1,32 @@
+{
+  "services": {
+    "app": {
+      "root": ".",
+      "framework": "nextjs",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "ml",
+          "format": "url",
+          "env": "ML_URL"
+        }
+      ]
+    },
+    "ml": {
+      "root": "ml",
+      "framework": "fastapi",
+      "entrypoint": "service:app",
+      "functions": {
+        "service.py": {
+          "maxDuration": 300
+        }
+      }
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": { "service": "app" }
+    }
+  ]
+}
