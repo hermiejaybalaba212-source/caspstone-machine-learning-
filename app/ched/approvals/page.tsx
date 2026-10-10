@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -141,8 +142,10 @@ export default function ChedApprovalsPage() {
           : a
       ));
       setBusyMsg(`Approved and notified the student. Auto-rejected ${res.rejectedCount} other application(s).`);
+      toast.success(`Approved and notified the student. Auto-rejected ${res.rejectedCount} other application(s).`);
     } else {
       setBusyMsg("Approved and notified the student. Dashboard and notifications updated.");
+      toast.success("Approved and notified the student. Dashboard and notifications updated.");
     }
   }
 
@@ -183,6 +186,7 @@ export default function ChedApprovalsPage() {
     });
     downloadCsv("final-approved-scholars.csv", rows);
     setBusyMsg(`Exported ${rows.length} approved scholar(s).`);
+    toast.success(`Exported ${rows.length} approved scholar(s).`);
   }
 
   function handleSendToAdmin() {
@@ -190,6 +194,7 @@ export default function ChedApprovalsPage() {
     if (!count) return;
     exportFinalList();
     setBusyMsg(`Final list of ${count} approved beneficiaries exported and ready for Administrator review. The Administrator will validate against the Registrar database and notify students.`);
+    toast.success(`Final list of ${count} approved beneficiaries exported and ready for Administrator review. The Administrator will validate against the Registrar database and notify students.`);
   }
 
   if (loading) return <Spinner label="Loading approvals..." color="blue" />;

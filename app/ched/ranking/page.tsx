@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -200,6 +201,7 @@ export default function ChedRankingPage() {
     const res = await autoRejectSiblings(approvedTargets, applications);
     setSelected(new Set());
     setMessage(`Approved ${selected.size} applicant(s) and notified ${notified} student(s). Dashboard/status updates are live.${res.rejectedCount > 0 ? ` Auto-rejected ${res.rejectedCount} other application(s).` : ""}`);
+    toast.success(`Approved ${selected.size} applicant(s) and notified ${notified} student(s). Dashboard/status updates are live.${res.rejectedCount > 0 ? ` Auto-rejected ${res.rejectedCount} other application(s).` : ""}`);
     setSaving(false);
     setReloadKey((k) => k + 1);
   }
@@ -226,6 +228,7 @@ export default function ChedRankingPage() {
     }
     setSelected(new Set());
     setMessage(`Rejected ${selected.size} applicant(s) and notified ${notified} student(s).`);
+    toast.success(`Rejected ${selected.size} applicant(s) and notified ${notified} student(s).`);
     setSaving(false);
     setReloadKey((k) => k + 1);
   }
@@ -267,6 +270,7 @@ export default function ChedRankingPage() {
       };
     }));
     setMessage(`Exported ${filtered.length} ranking records.`);
+    toast.success(`Exported ${filtered.length} ranking records.`);
   }
 
   if (loading) return <Spinner label="Loading ranking result..." color="blue" />;

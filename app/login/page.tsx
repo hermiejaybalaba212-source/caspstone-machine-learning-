@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import { getSupabase } from "@/lib/supabase/browser";
 
 function Field({ label, type, value, onChange, placeholder, showToggle, onToggle, icon }: { label: string; type: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder: string; showToggle?: boolean; onToggle?: () => void; icon?: string }) {
@@ -148,6 +149,7 @@ export default function LoginPage() {
 
       const params = new URLSearchParams(window.location.search);
       const redirectPath = params.get("redirect");
+      toast.success(`Signed in successfully — opening ${userData.role} dashboard.`);
       if (redirectPath && redirectPath.startsWith(roleHome) && !redirectPath.startsWith("//") && !redirectPath.includes(":") && !redirectPath.includes("\\")) {
         router.push(redirectPath);
         return;
@@ -173,7 +175,7 @@ export default function LoginPage() {
     setLoading(false);
 
     if (resetError) { setError(resetError.message); return; }
-    setMessage("If this email has an account, a password reset link has been sent.");
+    toast.success("If this email has an account, a password reset link has been sent.");
   };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -193,7 +195,7 @@ export default function LoginPage() {
     setNewPassword("");
     setConfirmPassword("");
     setMode("login");
-    setMessage("Password updated successfully. You can now log in.");
+    toast.success("Password updated successfully. You can now log in.");
   };
 
   return (
@@ -288,10 +290,19 @@ export default function LoginPage() {
 
             <div className="mt-6 border-t border-[#241012]/[0.06] pt-5 text-center">
               {mode === "login" ? (
-                <p className="text-sm text-[#6B5458]">
-                  No account yet?{" "}
-                  <Link href="/register" className="font-semibold text-[#7B1113] transition hover:underline">Register</Link>
-                </p>
+                <>
+                  <p className="text-sm text-[#6B5458]">
+                    No account yet?{" "}
+                    <Link href="/register" className="font-semibold text-[#7B1113] transition hover:underline">Register</Link>
+                  </p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-[#8B7376]">
+                    By signing in you agree to the{" "}
+                    <Link href="/terms" className="font-semibold text-[#7B1113] underline underline-offset-2 transition hover:brightness-110">
+                      Terms and Conditions
+                    </Link>{" "}
+                    of the ISEWM Scholarship System.
+                  </p>
+                </>
               ) : (
                 <button type="button" onClick={() => { setMode("login"); setError(""); setMessage(""); }} className="text-sm font-semibold text-[#7B1113] transition hover:underline">&larr; Back to login</button>
               )}

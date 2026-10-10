@@ -3,9 +3,10 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import { getSupabase } from "@/lib/supabase/browser";
 import { formatDate, validateFile } from "@/lib/utils";
-import { DOC_TYPES, DISABILITY_OPTIONS, IP_GROUP_OPTIONS, getProgramRequirementDocs } from "@/lib/constants";
+import { DISABILITY_OPTIONS, IP_GROUP_OPTIONS } from "@/lib/constants";
 import { Spinner } from "@/components/ui/spinner";
 
 interface StudentProfile {
@@ -69,11 +70,6 @@ function ApplyPageContent() {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrStatus, setOcrStatus] = useState("");
   const [showSampleForm, setShowSampleForm] = useState(false);
-  const [docFiles, setDocFiles] = useState<Record<string, File | null>>({});
-  const [acadApplicantType, setAcadApplicantType] = useState("");
-  const [acadScore, setAcadScore] = useState("");
-  const [acadProofFile, setAcadProofFile] = useState<File | null>(null);
-  const [acadTypeLocked, setAcadTypeLocked] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -194,15 +190,6 @@ function ApplyPageContent() {
 
       setForm((f) => ({ ...f, email: userQuery.data!.email || "" }));
 
-      const appliedRegType = authUser.user?.user_metadata?.applicant_type as string | undefined;
-      const regFreshman = appliedRegType
-        ? appliedRegType === "Freshman"
-        : (acct.year_level || "").toLowerCase().includes("1st") || (acct.year_level || "").toLowerCase().includes("freshman");
-      if (appliedRegType || acct.year_level) {
-        setAcadApplicantType(regFreshman ? "Freshman" : "Alumni");
-        setAcadTypeLocked(true);
-      }
-
       const programsQuery = await sb
         .from("scholarship_programs")
         .select("*")
@@ -255,10 +242,6 @@ function ApplyPageContent() {
   function handleZipChange(raw: string) {
     const digits = raw.replace(/\D/g, "").slice(0, 4);
     setForm((f) => ({ ...f, zipcode: digits }));
-  }
-
-  function handleDocFileChange(docType: string, file: File | null) {
-    setDocFiles((prev) => ({ ...prev, [docType]: file }));
   }
 
   const PH_PHONE_RE = /^09\d{9}$/;
@@ -322,51 +305,6 @@ function ApplyPageContent() {
     const fileErr = validateFile(itrFile);
     if (fileErr) {
       setMessage(fileErr);
-      setMessageType("error");
-      return;
-    }
-
-    const selectedProgram = programs.find((p) => p.scholarship_id === selectedProgramId);
-    const programDocs = selectedProgram ? getProgramRequirementDocs(selectedProgram.requirements) : [];
-    const requiredDocs = programDocs.length > 0 ? programDocs : [...DOC_TYPES];
-
-    for (const docType of requiredDocs) {
-      const file = docFiles[docType];
-      if (!file) {
-        setMessage(`Please attach the ${docType} document. It is required for this scholarship program.`);
-        setMessageType("error");
-        return;
-      }
-      const err = validateFile(file);
-      if (err) {
-        setMessage(`${docType}: ${err}`);
-        setMessageType("error");
-        return;
-      }
-    }
-
-    if (!acadApplicantType) {
-      setMessage("Please select an Applicant Type (Freshman or Alumni) in the Academic Records section.");
-      setMessageType("error");
-      return;
-    }
-
-    const acadScoreNum = Number(acadScore);
-    if (!acadScore || isNaN(acadScoreNum)) {
-      setMessage(`Please enter your ${acadApplicantType === "Alumni" ? "College GPA" : "SHS GWA"} in the Academic Records section.`);
-      setMessageType("error");
-      return;
-    }
-
-    if (!acadProofFile) {
-      setMessage("Please attach an academic record proof file in the Academic Records section.");
-      setMessageType("error");
-      return;
-    }
-
-    const acadErr = validateFile(acadProofFile);
-    if (acadErr) {
-      setMessage(`Academic record proof: ${acadErr}`);
       setMessageType("error");
       return;
     }
@@ -466,57 +404,6 @@ function ApplyPageContent() {
         return;
       }
 
-      for (const docType of requiredDocs) {
-        const file = docFiles[docType];
-        if (!file) continue;
-
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const docPath = `${profile.studentId}/${docType.replace(/\s+/g, "_")}/${Date.now()}_${safeName}`;
-
-        const docUpload = await sb.storage.from("support-documents").upload(docPath, file);
-        if (docUpload.error) {
-          setMessage(`Document upload failed (${docType}): ${docUpload.error.message}`);
-          setMessageType("error");
-          setSubmitting(false);
-          return;
-        }
-
-        await sb.from("support_documents").insert({
-          document_type: docType,
-          file_path: docPath,
-          application_id: appRow.application_id,
-        });
-      }
-
-      if (acadProofFile && acadApplicantType) {
-        const safeName = acadProofFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const acadFolder = acadApplicantType === "Freshman" ? "SHS" : "Alumni";
-        const acadPath = `${profile.studentId}/${acadFolder}/${Date.now()}_${safeName}`;
-
-        const acadUpload = await sb.storage.from("academic-records").upload(acadPath, acadProofFile);
-        if (acadUpload.error) {
-          setMessage(`Academic record upload failed: ${acadUpload.error.message}`);
-          setMessageType("error");
-          setSubmitting(false);
-          return;
-        }
-
-        const acadPayload: Record<string, unknown> = {
-          student_id: profile.studentId,
-          applicant_type: acadApplicantType,
-          proof_image_path: acadPath,
-        };
-
-        const score = Number(acadScore);
-        if (acadApplicantType === "Freshman") {
-          acadPayload.shs_gwa = score;
-        } else {
-          acadPayload.college_gpa = score;
-        }
-
-        await sb.from("support_academic_records").insert(acadPayload);
-      }
-
       const selectedProgram = programs.find((p) => p.scholarship_id === selectedProgramId);
 
       await sb.from("notifications_announcements").insert({
@@ -528,9 +415,10 @@ function ApplyPageContent() {
       });
 
       setMessage(
-        `Application submitted for "${selectedProgram?.scholarship_name || "scholarship"}". Track it in Application Status.`
+        `Application submitted for "${selectedProgram?.scholarship_name || "scholarship"}". Upload your supporting documents and academic records under Profile & Documents, and track the status in Application Status.`
       );
       setMessageType("success");
+      toast.success(`Application submitted for "${selectedProgram?.scholarship_name || "scholarship"}"!`);
 
       setForm({
         fatherName: "",
@@ -544,10 +432,6 @@ function ApplyPageContent() {
         annualIncome: "",
       });
       setItrFile(null);
-      setDocFiles({});
-      setAcadApplicantType("");
-      setAcadScore("");
-      setAcadProofFile(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
       setMessage(msg);
@@ -572,19 +456,12 @@ function ApplyPageContent() {
     );
   }
 
-  const selectedProgramForDocs = programs.find((p) => p.scholarship_id === selectedProgramId);
-  const programDocsForRender = selectedProgramForDocs
-    ? getProgramRequirementDocs(selectedProgramForDocs.requirements)
-    : [];
-  const renderRequiredDocs =
-    programDocsForRender.length > 0 ? programDocsForRender : [...DOC_TYPES];
-
   return (
     <div>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-[#241012]">Submit Application</h1>
-          <p className="mt-1 text-xs text-[#6B5458]">Fill in the form and upload your requirements to apply for a scholarship.</p>
+          <p className="mt-1 text-xs text-[#6B5458]">Fill in the form to apply for a scholarship. Upload your supporting documents and academic records under Profile &amp; Documents.</p>
         </div>
         <button
           type="button"
@@ -767,81 +644,13 @@ function ApplyPageContent() {
         </div>
 
         <div className="rounded-xl border border-[#241012]/[0.06] bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-[#241012]">Supporting Documents</h2>
+          <h2 className="text-sm font-bold text-[#241012]">Supporting Documents &amp; Academic Records</h2>
           <p className="mt-1 text-[11px] text-[#6B5458]">
-            {renderRequiredDocs.length > 0
-              ? <>Upload clear scans of each required document below (JPG, PNG, or PDF, max 10 MB). Only the requirements checked by the <span className="font-semibold text-[#7B1113]">{selectedProgramForDocs?.scholarship_name || "selected program"}</span> are shown.</>
-              : "Upload clear scans of each requirement (JPG, PNG, or PDF, max 10 MB)."}
+            These are no longer uploaded here. Manage them under{" "}
+            <span className="font-semibold text-[#7B1113]">Profile &amp; Documents</span>: your COR, Valid ID,
+            Signature Form, ITR, and academic records (SHS GWA / College GPA with proof). They stay attached to
+            your account and are shown to reviewers together with this application.
           </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            {renderRequiredDocs.map((docType) => (
-              <div
-                key={docType}
-                className="rounded-xl border border-dashed border-[#241012]/15 bg-[#FAF7F5] p-4 text-center"
-              >
-                <p className="text-xs font-bold text-[#241012]">{docType}</p>
-                <label className="mt-3 block cursor-pointer rounded-lg bg-[#7B1113] px-3 py-2 text-xs font-bold text-white hover:bg-[#540111]">
-                  {docFiles[docType] ? "Change File" : "Choose File"}
-                  <input
-                    type="file"
-                    accept=".jpg,.jpeg,.png,.webp,.pdf"
-                    onChange={(e) => handleDocFileChange(docType, e.target.files?.[0] || null)}
-                    className="hidden"
-                  />
-                </label>
-                {docFiles[docType] && (
-                  <p className="mt-2 truncate text-[10px] text-green-700">
-                    {docFiles[docType]!.name}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-[#241012]/[0.06] bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-[#241012]">Academic Records</h2>
-          <p className="mt-1 text-[11px] text-[#6B5458]">Academic records are kept on file for verification purposes.</p>
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            <label className="block text-xs font-semibold text-[#241012]">
-              Applicant Type *
-              <select
-                value={acadApplicantType}
-                onChange={(e) => setAcadApplicantType(e.target.value)}
-                disabled={acadTypeLocked}
-                className="mt-1 w-full rounded-lg border border-[#241012]/15 bg-white px-3 py-2 text-xs outline-none focus:border-[#7B1113] disabled:cursor-not-allowed disabled:bg-[#F3EEEB] disabled:text-[#6B5458]"
-              >
-                <option value="">Select...</option>
-                <option value="Freshman">Freshman</option>
-                <option value="Alumni">Alumni</option>
-              </select>
-              {acadTypeLocked && (
-                <span className="mt-0.5 block text-[10px] text-[#7B1113]">Auto-set from your registration.</span>
-              )}
-            </label>
-            <label className="block text-xs font-semibold text-[#241012]">
-              {acadApplicantType === "Alumni" ? "College GPA *" : "SHS GWA *"} (1–100)
-              <input
-                type="number"
-                min="1"
-                max="100"
-                step="0.01"
-                value={acadScore}
-                onChange={(e) => setAcadScore(e.target.value)}
-                placeholder="e.g. 95"
-                className="mt-1 w-full rounded-lg border border-[#241012]/15 bg-white px-3 py-2 text-xs outline-none focus:border-[#7B1113]"
-              />
-            </label>
-            <label className="block text-xs font-semibold text-[#241012]">
-              Proof File *
-              <input
-                type="file"
-                accept=".jpg,.jpeg,.png,.webp,.pdf"
-                onChange={(e) => setAcadProofFile(e.target.files?.[0] || null)}
-                className="mt-1 w-full rounded-lg border border-dashed border-[#241012]/15 bg-[#FAF7F5] px-3 py-2 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-[#7B1113] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
-              />
-            </label>
-          </div>
         </div>
 
         <div className="flex justify-end">
@@ -880,14 +689,8 @@ function ApplyPageContent() {
                 <li>Annual Family Income (PHP) *</li>
                 <li>ITR File * — JPG / PNG / PDF, max 10 MB (OCR may auto-detect income)</li>
               </ul>
-              <p className="mt-3 font-bold uppercase tracking-wide text-[#7B1113]">Section 3 — Supporting Documents</p>
-              <p className="text-[#6B5458]">Upload clear scans of each required document for your program.</p>
-              <p className="mt-3 font-bold uppercase tracking-wide text-[#7B1113]">Section 4 — Academic Records</p>
-              <ul className="list-inside list-disc space-y-1 text-[#6B5458]">
-                <li>Applicant Type * (Freshman / Alumni)</li>
-                <li>SHS GWA or College GPA * (1–100)</li>
-                <li>Proof File *</li>
-              </ul>
+              <p className="mt-3 font-bold uppercase tracking-wide text-[#7B1113]">Section 3 — Supporting Documents &amp; Academic Records</p>
+              <p className="text-[#6B5458]">Managed under Profile &amp; Documents: COR, Valid ID, Signature Form, ITR, and academic records (SHS GWA / College GPA with proof).</p>
             </div>
           </div>
         </div>

@@ -1,0 +1,16 @@
+# ISEWM Scholarship System - OCR + Random Forest ranking pipeline
+# Python 3.14.3 (C:\Program Files\Python314\python.exe)
+#
+#   py -3 -m pip install -r ml\requirements.txt
+#
+# Install onnxruntime-directml LAST: it replaces the stock onnxruntime
+# runtime files so RapidOCR runs on the GPU (DmlExecutionProvider).
+
+numpy==2.5.3
+scipy==1.18.1
+pillow==12.3.0
+scikit-learn==1.9.1
+joblib==1.6.0
+opencv-python==5.0.0.93
+rapidocr-onnxruntime==1.2.3
+onnxruntime-directml==1.24.4

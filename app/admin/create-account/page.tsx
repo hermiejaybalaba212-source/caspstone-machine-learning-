@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useState } from "react";
 import { getSupabase } from "@/lib/supabase/browser";
@@ -69,6 +70,7 @@ export default function CreateFacultyAccountPage() {
     setForm({ username: "", email: "", password: "" });
     setIsError(false);
     setMessage("Faculty account created successfully.");
+    toast.success("Faculty account created successfully.");
   }
 
   return (

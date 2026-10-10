@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -282,6 +283,7 @@ export default function UserManagementPage() {
     setEditingUserId(null);
     setEditForm(null);
     setMessage("Account details updated successfully.");
+    toast.success("Account details updated successfully.");
     setMessageType("ok");
   }
 

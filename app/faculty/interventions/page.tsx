@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import toast from "react-hot-toast";
 import { getSupabase } from "@/lib/supabase/browser";
 import { formatDateTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -162,6 +163,7 @@ function FacultyInterventionsContent() {
     setSuccessMsg(
       "Intervention sent \u2014 the student will see it in their notifications."
     );
+    toast.success("Intervention sent to the student.");
     setInterventionMsg("");
     setTargetStudent("");
 

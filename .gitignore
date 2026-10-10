@@ -72,3 +72,10 @@ eng.traineddata
 csv in applications schoalrships.txt
 updated comments.txt
 balaba-magbaril-system-Comments.docx
+
+# python
+__pycache__/
+*.pyc
+
+# ml artifacts (machine-generated)
+ml/models/

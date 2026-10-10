@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -250,6 +251,7 @@ export default function ChedApplicationsPage() {
       a.application_id === app.application_id ? { ...a, application_status: targetStatus } : a
     ));
     setMessage(`${app.student_accounts?.last_name || "Application"} marked as ${targetStatus} and the student was notified.${rejectNote}`);
+    toast.success(`${app.student_accounts?.last_name || "Application"} marked as ${targetStatus} and the student was notified.${rejectNote}`);
     setSavingId(null);
   }
 
@@ -288,6 +290,7 @@ export default function ChedApplicationsPage() {
       a.application_id === app.application_id ? { ...a, application_status: newStatus, remarks: newRemarks } : a
     ));
     setMessage(`Updated status to ${newStatus} and notified the student.${rejectNote}`);
+    toast.success(`Updated status to ${newStatus} and notified the student.${rejectNote}`);
     setSavingId(null);
   }
 
@@ -298,6 +301,7 @@ export default function ChedApplicationsPage() {
     await notifyStudent(app, "Notification from SPC Scholarship Office", msg);
     setNotifyDraft((prev) => ({ ...prev, [app.application_id]: "" }));
     setMessage(`Notification sent to ${app.student_accounts?.last_name || "student"}.`);
+    toast.success(`Notification sent to ${app.student_accounts?.last_name || "student"}.`);
   }
 
   function toggleSelect(appId: number) {
@@ -358,6 +362,7 @@ export default function ChedApplicationsPage() {
       ));
       setSelectedIds(new Set());
       setMessage(`Updated ${scopeIds.length} application(s) to ${targetStatus} and notified students.${rejectNote}`);
+      toast.success(`Updated ${scopeIds.length} application(s) to ${targetStatus} and notified students.${rejectNote}`);
     } finally {
       setBatchBusy(false);
     }
@@ -381,6 +386,7 @@ export default function ChedApplicationsPage() {
     if (error) { setMessage(`Notify failed: ${error.message}`); return; }
     setBatchMsg("");
     setMessage(`Notification sent to ${rows.length} student(s).`);
+    toast.success(`Notification sent to ${rows.length} student(s).`);
   }
 
   function buildCsvRows(apps: Application[]) {
@@ -432,12 +438,14 @@ export default function ChedApplicationsPage() {
     if (!rows.length) return;
     downloadCsv("ched-applications.csv", rows);
     setMessage(`Exported ${rows.length} application(s) as CSV.`);
+    toast.success(`Exported ${rows.length} application(s) as CSV.`);
   }
 
   function exportOneCsv(app: Application) {
     const rows = buildCsvRows([app]);
     downloadCsv(`application-${app.application_id}-details.csv`, rows);
     setMessage("Exported this student's full application form as CSV.");
+    toast.success("Exported this student's full application form as CSV.");
   }
 
   const viewingApp = applications.find((a) => a.application_id === viewingId) || null;

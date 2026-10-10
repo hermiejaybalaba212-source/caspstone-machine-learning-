@@ -415,6 +415,9 @@ export default function LandingPage() {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 text-center text-xs text-white/30 sm:flex-row sm:px-6 lg:px-8">
           <span>&copy; {new Date().getFullYear()} St. Peter&rsquo;s College, Iligan City</span>
           <span>Intelligent Scholarship Application, Ranking &amp; Early-Warning Monitoring System for HEIs</span>
+          <Link href="/terms" className="text-white/40 underline underline-offset-2 transition hover:text-white/70">
+            Terms &amp; Conditions
+          </Link>
         </div>
       </footer>
     </div>

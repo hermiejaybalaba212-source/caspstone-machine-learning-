@@ -1,6 +1,7 @@
 "use client";
+import toast from "react-hot-toast";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabase } from "@/lib/supabase/browser";
 import { formatDateTime, downloadCsv } from "@/lib/utils";
@@ -14,6 +15,8 @@ interface StudentAccount {
   student_number?: string;
   given_name?: string;
   last_name?: string;
+  middle_name?: string;
+  year_level?: string;
 }
 
 interface SupportDocument {
@@ -42,6 +45,8 @@ interface ChedForm {
   student_id?: string;
   last_name?: string;
   given_name?: string;
+  middle_name?: string;
+  year_level?: string;
   annual_income_family?: number;
   income_tax_return?: string;
   contact_number?: string;
@@ -60,9 +65,10 @@ function isImagePath(path?: string) {
   return !!path && IMG_RE.test(path.split(/[?#]/)[0]);
 }
 
-function fullName(s?: StudentAccount) {
+function fullName(s?: StudentAccount | { given_name?: string; last_name?: string; middle_name?: string }) {
   if (!s) return "Student";
-  const n = `${s.last_name || ""}, ${s.given_name || ""}`.replace(/^, |, $/g, "").trim();
+  const first = [s.given_name, "middle_name" in s ? s.middle_name : undefined].filter(Boolean).join(" ");
+  const n = `${s.last_name || ""}, ${first}`.replace(/^, |, $/g, "").trim();
   return n || "Student";
 }
 
@@ -70,24 +76,29 @@ function safeFile(name: string) {
   return name.replace(/[^\w.]+/g, "_");
 }
 
-function Thumb({ url, path, onClick }: { url?: string; path?: string; onClick: () => void }) {
-  if (!url) {
-    return (
-      <button onClick={onClick} className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-dashed border-[#241012]/15 bg-[#F3EEEB] text-2xl">
-        &#128196;
-      </button>
-    );
-  }
-  return (
-    <button onClick={onClick} className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-[#241012]/[0.06] bg-[#F3EEEB] shadow-sm transition hover:ring-2 hover:ring-[#7B1113]/40">
-      {isImagePath(path) ? (
-        <img src={url} alt="document preview" className="h-full w-full object-cover" />
-      ) : (
-        <span className="flex h-full w-full items-center justify-center text-2xl">&#128196;</span>
-      )}
-    </button>
-  );
-}
+type Kind = "support" | "academic" | "itr";
+
+const KIND_META: Record<Kind, { label: string; cls: string }> = {
+  itr: { label: "ITR", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  academic: { label: "Academic Record", cls: "border-blue-200 bg-blue-50 text-blue-700" },
+  support: { label: "Support Document", cls: "border-[#7B1113]/25 bg-[#7B1113]/5 text-[#7B1113]" },
+};
+const KIND_ORDER: Record<Kind, number> = { itr: 0, academic: 1, support: 2 };
+
+type DocRow = {
+  key: string;
+  kind: Kind;
+  studentNumber: string;
+  name: string;
+  year: string;
+  details: string;
+  uploaded?: string;
+  url?: string;
+  bucket: string;
+  path: string;
+  deleteId: number;
+  fileLabel: string;
+};
 
 type PreviewItem = { url: string; name: string; bucket: string; path: string };
 
@@ -101,17 +112,12 @@ export default function AdminDocumentsPage() {
   const [acads, setAcads] = useState<AcademicRecord[]>([]);
   const [chedForms, setChedForms] = useState<ChedForm[]>([]);
   const [selectedStudent, setSelectedStudent] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | Kind>("all");
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<PreviewItem | null>(null);
   const [dlBusy, setDlBusy] = useState(false);
   const [dlProgress, setDlProgress] = useState({ done: 0, total: 0 });
   const [delBusyKey, setDelBusyKey] = useState<string | null>(null);
-
-  async function signBucket(bucket: string, path: string) {
-    const sb = getSupabase();
-    const res = await sb.storage.from(bucket).createSignedUrl(path, 3600);
-    return res.data?.signedUrl ?? null;
-  }
 
   useEffect(() => {
     let ignore = false;
@@ -122,16 +128,16 @@ export default function AdminDocumentsPage() {
 
       const [studentsQ, docsQ, acadsQ, chedQ] = await Promise.all([
         sb.from("student_accounts")
-          .select("student_id, student_number, given_name, last_name")
+          .select("student_id, student_number, given_name, last_name, middle_name, year_level")
           .order("last_name", { ascending: true }),
         sb.from("support_documents")
-          .select("*, scholarship_applications(student_accounts(given_name, last_name, student_number))")
+          .select("*, scholarship_applications(student_accounts(student_id, student_number, given_name, last_name, middle_name, year_level))")
           .order("upload_date", { ascending: false }),
         sb.from("support_academic_records")
-          .select("*, student_accounts(given_name, last_name, student_number)")
+          .select("*, student_accounts(student_id, student_number, given_name, last_name, middle_name, year_level)")
           .order("created_at", { ascending: false }),
         sb.from("ched_form_input")
-          .select("*, scholarship_applications(scholarship_id, scholarship_programs(scholarship_name), student_accounts(given_name, last_name, student_number))")
+          .select("*, scholarship_applications(scholarship_id, scholarship_programs(scholarship_name), student_accounts(student_id, student_number, given_name, last_name, middle_name, year_level))")
           .order("ched_form_id", { ascending: false }),
       ]);
 
@@ -145,20 +151,20 @@ export default function AdminDocumentsPage() {
       if (!chedQ.error) setChedForms(loadedChed);
 
       const map: Record<string, string> = {};
-      for (const d of loadedDocs) {
-        const url = await signBucket("support-documents", d.file_path);
-        if (url) map[d.file_path] = url;
-      }
-      for (const a of loadedAcads) {
-        if (!a.proof_image_path) continue;
-        const url = await signBucket("academic-records", a.proof_image_path);
-        if (url) map[a.proof_image_path] = url;
-      }
-      for (const c of loadedChed) {
-        if (!c.income_tax_return) continue;
-        const url = await signBucket("itr-documents", c.income_tax_return);
-        if (url) map[c.income_tax_return] = url;
-      }
+      const signBatch = async (bucket: string, paths: (string | null | undefined)[]) => {
+        const uniq = [...new Set(paths.filter((p): p is string => !!p))];
+        if (!uniq.length) return;
+        const { data, error } = await sb.storage.from(bucket).createSignedUrls(uniq, 3600);
+        if (error || !data) return;
+        for (const item of data) {
+          if (item?.signedUrl && item?.path) map[item.path] = item.signedUrl;
+        }
+      };
+      await Promise.all([
+        signBatch("support-documents", loadedDocs.map((d) => d.file_path)),
+        signBatch("academic-records", loadedAcads.map((a) => a.proof_image_path)),
+        signBatch("itr-documents", loadedChed.map((c) => c.income_tax_return)),
+      ]);
       if (!ignore) {
         setFileUrls(map);
         setLoading(false);
@@ -223,12 +229,13 @@ export default function AdminDocumentsPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(obj);
       setFlash({ type: "ok", text: `Downloaded ${files.length} file(s) as one ZIP.` });
+      toast.success(`Downloaded ${files.length} file(s) as one ZIP.`);
     } finally {
       setDlBusy(false);
     }
   }
 
-  async function deleteOne(kind: "support" | "academic" | "itr", key: number, bucket: string, path: string) {
+  async function deleteOne(kind: Kind, key: number, bucket: string, path: string) {
     if (!confirm("Delete this document permanently? This cannot be undone.")) return;
     setDelBusyKey(`${kind}-${key}`);
     setFlash(null);
@@ -255,101 +262,119 @@ export default function AdminDocumentsPage() {
       return next;
     });
     setFlash({ type: "ok", text: "Document deleted permanently." });
+    toast.success("Document deleted permanently.");
   }
 
-  function exportDocumentsCsv() {
-    downloadCsv(
-      "support-documents.csv",
-      docs.map((d) => ({
-        document_id: d.document_id,
-        student_number: d.scholarship_applications?.student_accounts?.student_number ?? "",
-        student: fullName(d.scholarship_applications?.student_accounts),
-        document_type: d.document_type,
-        storage_folder: d.file_path.split("/").slice(0, 2).join("/"),
-        file: d.file_path.split("/").pop(),
-        uploaded: formatDateTime(d.upload_date),
-      }))
-    );
-    setFlash({ type: "ok", text: `Exported ${docs.length} support document(s) as CSV.` });
-  }
+  const selectedNumber = selectedStudent
+    ? students.find((s) => s.student_id === Number(selectedStudent))?.student_number
+    : undefined;
 
-  function exportAcademicsCsv() {
-    downloadCsv(
-      "academic-records.csv",
-      acads.map((a) => ({
-        record_id: a.record_id,
-        student_number: a.student_accounts?.student_number ?? "",
-        student: fullName(a.student_accounts),
-        applicant_type: a.applicant_type,
-        shs_gwa: a.shs_gwa ?? "",
-        college_gpa: a.college_gpa ?? "",
-        storage_folder: a.proof_image_path ? a.proof_image_path.split("/").slice(0, 2).join("/") : "",
-        submitted: formatDateTime(a.created_at),
-      }))
-    );
-    setFlash({ type: "ok", text: `Exported ${acads.length} academic record(s) as CSV.` });
-  }
-
-  function exportItrCsv() {
-    downloadCsv(
-      "itr-submissions.csv",
-      chedForms.map((c) => {
-        const sa = c.scholarship_applications?.student_accounts;
+  const studentRows: DocRow[] = useMemo(() => {
+    const rows: DocRow[] = [
+      ...docs.map((d): DocRow => {
+        const s = d.scholarship_applications?.student_accounts;
+        const file = d.file_path.split("/").pop() || d.document_type;
         return {
-          form_id: c.ched_form_id,
-          application_id: c.application_id,
-          student_number: c.student_id || sa?.student_number || "",
-          student: fullName(sa) || `${c.last_name || ""}, ${c.given_name || ""}`.replace(/^, |, $/g, ""),
-          scholarship: c.scholarship_applications?.scholarship_programs?.scholarship_name || "",
-          annual_income_family: c.annual_income_family,
-          contact: c.contact_number || "",
-          email: c.email_address || "",
-          father: c.father_name || "",
-          mother: c.mother_name || "",
-          itr_file: c.income_tax_return ? c.income_tax_return.split("/").pop() : "",
-          storage_folder: c.income_tax_return ? `itr-documents/${c.income_tax_return.split("/").slice(0, 2).join("/")}` : "",
-          submitted: formatDateTime(c.created_at),
+          key: `support-${d.document_id}`,
+          kind: "support",
+          studentNumber: s?.student_number || "\u2014",
+          name: fullName(s),
+          year: s?.year_level || "\u2014",
+          details: `${d.document_type} \u00b7 ${file}`,
+          uploaded: d.upload_date,
+          url: fileUrls[d.file_path],
+          bucket: "support-documents",
+          path: d.file_path,
+          deleteId: d.document_id,
+          fileLabel: buildFileName("support", s, d.file_path),
         };
-      })
+      }),
+      ...acads.map((a): DocRow => {
+        const s = a.student_accounts;
+        const grade = a.shs_gwa != null ? `SHS GWA ${a.shs_gwa}` : a.college_gpa != null ? `College GPA ${a.college_gpa}` : "No grade recorded";
+        return {
+          key: `academic-${a.record_id}`,
+          kind: "academic",
+          studentNumber: s?.student_number || "\u2014",
+          name: fullName(s),
+          year: s?.year_level || "\u2014",
+          details: `${a.applicant_type} \u00b7 ${grade}`,
+          uploaded: a.created_at,
+          url: a.proof_image_path ? fileUrls[a.proof_image_path] : undefined,
+          bucket: "academic-records",
+          path: a.proof_image_path || "",
+          deleteId: a.record_id,
+          fileLabel: buildFileName("academic", s, a.proof_image_path),
+        };
+      }),
+      ...chedForms.map((c): DocRow => {
+        const s = c.scholarship_applications?.student_accounts;
+        const name = fullName(s) !== "Student"
+          ? fullName(s)
+          : `${c.last_name || ""}, ${c.given_name || ""}`.replace(/^, |, $/g, "").trim() || "Student";
+        const sch = c.scholarship_applications?.scholarship_programs?.scholarship_name;
+        const income = c.annual_income_family ? `\u20b1${Number(c.annual_income_family).toLocaleString()}/yr` : null;
+        const file = c.income_tax_return ? c.income_tax_return.split("/").pop() || "" : "";
+        const details = [sch || "No scholarship linked", income, `App #${c.application_id}`, file].filter(Boolean).join(" \u00b7 ");
+        return {
+          key: `itr-${c.ched_form_id}`,
+          kind: "itr",
+          studentNumber: c.student_id || s?.student_number || "\u2014",
+          name,
+          year: c.year_level || s?.year_level || "\u2014",
+          details,
+          uploaded: c.created_at,
+          url: c.income_tax_return ? fileUrls[c.income_tax_return] : undefined,
+          bucket: "itr-documents",
+          path: c.income_tax_return || "",
+          deleteId: c.ched_form_id,
+          fileLabel: buildFileName("itr", s, c.income_tax_return),
+        };
+      }),
+    ];
+
+    const filtered = selectedNumber ? rows.filter((r) => r.studentNumber === selectedNumber) : rows;
+    filtered.sort(
+      (a, b) =>
+        a.name.localeCompare(b.name) ||
+        KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+        (b.uploaded || "").localeCompare(a.uploaded || "")
     );
-    setFlash({ type: "ok", text: `Exported ${chedForms.length} ITR submission(s) as CSV.` });
+    return filtered;
+  }, [docs, acads, chedForms, fileUrls, selectedNumber]);
+
+  const rows = useMemo(
+    () => (typeFilter === "all" ? studentRows : studentRows.filter((r) => r.kind === typeFilter)),
+    [studentRows, typeFilter]
+  );
+
+  const kindCount = (k: Kind) => studentRows.filter((r) => r.kind === k).length;
+
+  const allDownloadable: { url: string; name: string }[] = rows
+    .filter((r) => r.url)
+    .map((r) => ({ url: r.url!, name: r.fileLabel }));
+
+  function exportCsv() {
+    downloadCsv(
+      "documents.csv",
+      rows.map((r, i) => ({
+        no: i + 1,
+        student_id: r.studentNumber,
+        full_name: r.name,
+        year_level: r.year,
+        type: KIND_META[r.kind].label,
+        details: r.details,
+        uploaded: formatDateTime(r.uploaded),
+        file: r.path.split("/").pop() || "",
+      }))
+    );
+    setFlash({ type: "ok", text: `Exported ${rows.length} document row(s) as CSV.` });
+    toast.success(`Exported ${rows.length} document row(s) as CSV.`);
   }
-
-  const selectedNum = selectedStudent ? Number(selectedStudent) : null;
-  const selectedStudentNumber = students.find((s) => s.student_id === selectedNum)?.student_number;
-  const visibleDocs = selectedStudentNumber
-    ? docs.filter((d) => d.scholarship_applications?.student_accounts?.student_number === selectedStudentNumber)
-    : docs;
-  const visibleAcads = selectedNum ? acads.filter((a) => a.student_id === selectedNum) : acads;
-  const visibleChed = selectedNum
-    ? chedForms.filter((c) => {
-        const sa = c.scholarship_applications?.student_accounts;
-        return sa?.student_number === students.find((s) => s.student_id === selectedNum)?.student_number;
-      })
-    : chedForms;
-
-  const allDownloadable: { url: string; name: string }[] = [
-    ...visibleDocs
-      .filter((d) => fileUrls[d.file_path])
-      .map((d) => ({
-        url: fileUrls[d.file_path],
-        name: buildFileName("support", d.scholarship_applications?.student_accounts, d.file_path),
-      })),
-    ...visibleAcads
-      .filter((a) => a.proof_image_path && fileUrls[a.proof_image_path])
-      .map((a) => ({
-        url: fileUrls[a.proof_image_path!],
-        name: buildFileName("academic", a.student_accounts, a.proof_image_path),
-      })),
-    ...visibleChed
-      .filter((c) => c.income_tax_return && fileUrls[c.income_tax_return])
-      .map((c) => ({
-        url: fileUrls[c.income_tax_return!],
-        name: buildFileName("itr", c.scholarship_applications?.student_accounts, c.income_tax_return),
-      })),
-  ];
 
   if (loading) return <Spinner label="Loading documents..." />;
+
+  const cellCls = "border border-[#241012]/10 px-3 py-1.5 align-middle";
 
   return (
     <div className="space-y-5">
@@ -357,14 +382,19 @@ export default function AdminDocumentsPage() {
         <div>
           <h1 className="text-xl font-bold text-[#241012]">Documents Viewer</h1>
           <p className="mt-1 text-xs text-[#8B7376]">
-            Preview, download, or export every document uploaded by your students.
+            Every submitted file in one list — ITR, academic records, and support documents.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() =>
-              downloadAll(allDownloadable)
-            }
+            onClick={exportCsv}
+            disabled={!rows.length}
+            className="rounded-xl border border-[#7B1113]/30 px-4 py-2.5 text-xs font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
+          >
+            &#11015; Export CSV
+          </button>
+          <button
+            onClick={() => downloadAll(allDownloadable)}
             disabled={!allDownloadable.length || dlBusy}
             className="rounded-xl bg-gradient-to-r from-[#7B1113] to-[#540111] px-4 py-2.5 text-xs font-bold text-white shadow-md transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -379,220 +409,124 @@ export default function AdminDocumentsPage() {
         </div>
       )}
 
-      <div className="flex flex-col gap-3 rounded-xl border border-[#241012]/[0.06] bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <label className="text-xs font-semibold text-[#241012]">
-          Filter by student
-          <select
-            value={selectedStudent}
-            onChange={(e) => setSelectedStudent(e.target.value)}
-            className="mt-1.5 block w-full min-w-64 rounded-xl border border-[#241012]/10 bg-white px-3.5 py-2.5 text-xs outline-none transition focus:border-[#7B1113] focus:ring-4 focus:ring-[#7B1113]/10"
-          >
-            <option value="">All students</option>
-            {students.map((s) => (
-              <option key={s.student_id} value={s.student_id}>
-                {s.last_name}, {s.given_name} ({s.student_number || "no ID"})
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={exportDocumentsCsv}
-            disabled={!docs.length}
-            className="rounded-xl border border-[#7B1113]/30 px-4 py-2.5 text-xs font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
-          >
-            &#11015; Support docs CSV
-          </button>
-          <button
-            onClick={exportAcademicsCsv}
-            disabled={!acads.length}
-            className="rounded-xl border border-[#7B1113]/30 px-4 py-2.5 text-xs font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
-          >
-            &#11015; Academic CSV
-          </button>
-          <button
-            onClick={exportItrCsv}
-            disabled={!chedForms.length}
-            className="rounded-xl border border-[#7B1113]/30 px-4 py-2.5 text-xs font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
-          >
-            &#11015; ITR CSV
-          </button>
-        </div>
-      </div>
-
-      {docs.length === 0 && acads.length === 0 && chedForms.length === 0 ? (
+      {studentRows.length === 0 ? (
         <EmptyState icon="&#128450;" title="No uploads yet" hint="Files appear here as students upload requirements." />
       ) : (
-        <>
-          <section className="rounded-xl border border-[#241012]/[0.06] bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-[#241012]">Support Documents</h2>
-              <span className="rounded-full bg-[#7B1113]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#7B1113]">{visibleDocs.length}</span>
+        <div className="overflow-hidden rounded-2xl border border-[#241012]/[0.07] bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#241012]/[0.07] bg-gradient-to-r from-[#FAF7F5] to-white px-5 py-4">
+            <div>
+              <p className="text-sm font-bold text-[#241012]">Submitted Documents</p>
+              <p className="mt-0.5 text-[11px] text-[#6B5458]">
+                {studentRows.length} file{studentRows.length === 1 ? "" : "s"} total &middot;{" "}
+                <span className="font-semibold text-[#7B1113]">{rows.length} shown</span>
+                {" \u00b7 "}
+                <span className="text-[#6B5458]">View opens a preview &middot; Download saves the file &middot; Delete removes it permanently</span>
+              </p>
             </div>
-            {visibleDocs.length === 0 ? (
-              <p className="mt-3 text-xs text-[#8B7376]">Nothing to show for this filter.</p>
-            ) : (
-              <ul className="mt-4 space-y-3">
-                {visibleDocs.map((d) => {
-                  const s = d.scholarship_applications?.student_accounts;
-                  const url = fileUrls[d.file_path];
-                  return (
-                    <li key={d.document_id} className="flex items-center gap-4 rounded-xl border border-[#241012]/[0.06] bg-[#FAF7F5]/50 p-3.5">
-                      <Thumb
-                        url={url}
-                        path={d.file_path}
-                        onClick={() => url && setPreview({ url, name: d.file_path.split("/").pop() || d.document_type, bucket: "support-documents", path: d.file_path })}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge className="border-[#7B1113]/20 bg-[#7B1113]/5 text-[#7B1113]">{d.document_type}</Badge>
-                          <span className="text-xs font-bold text-[#241012]">{fullName(s)}</span>
-                          <span className="text-[11px] text-[#8B7376]">({s?.student_number})</span>
-                        </div>
-                        <p className="mt-1 text-[11px] text-[#8B7376]">Uploaded {formatDateTime(d.upload_date)}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col gap-1.5">
-                        {url && (
-                          <a href={url} target="_blank" rel="noreferrer" className="rounded-xl px-3 py-1.5 text-center text-[11px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5">
-                            View
-                          </a>
-                        )}
-                        {url && (
-                          <button
-                            onClick={() => downloadOne(url, buildFileName("support", s, d.file_path))}
-                            disabled={dlBusy}
-                            className="rounded-xl border border-[#7B1113]/25 px-3 py-1.5 text-[11px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
-                          >
-                            Download
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteOne("support", d.document_id, "support-documents", d.file_path)}
-                          disabled={delBusyKey === `support-${d.document_id}`}
-                          className="rounded-xl border border-red-200 px-3 py-1.5 text-[11px] font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
-                        >
-                          {delBusyKey === `support-${d.document_id}` ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-[#241012]/[0.06] bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-[#241012]">Academic Records</h2>
-              <span className="rounded-full bg-[#7B1113]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#7B1113]">{visibleAcads.length}</span>
+            <div className="flex flex-wrap gap-2">
+              <label className="text-xs font-semibold text-[#241012]">
+                <select
+                  value={selectedStudent}
+                  onChange={(e) => setSelectedStudent(e.target.value)}
+                  className="block w-full min-w-64 rounded-xl border border-[#241012]/10 bg-white px-3.5 py-2.5 text-xs outline-none transition focus:border-[#7B1113] focus:ring-4 focus:ring-[#7B1113]/10"
+                >
+                  <option value="">All students</option>
+                  {students.map((s) => (
+                    <option key={s.student_id} value={s.student_id}>
+                      {s.last_name}, {s.given_name} ({s.student_number || "no ID"})
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            {visibleAcads.length === 0 ? (
-              <p className="mt-3 text-xs text-[#8B7376]">Nothing to show for this filter.</p>
-            ) : (
-              <ul className="mt-4 space-y-3">
-                {visibleAcads.map((a) => {
-                  const url = a.proof_image_path ? fileUrls[a.proof_image_path] : undefined;
-                  return (
-                    <li key={a.record_id} className="flex items-center gap-4 rounded-xl border border-[#241012]/[0.06] bg-[#FAF7F5]/50 p-3.5">
-                      <Thumb
-                        url={url}
-                        path={a.proof_image_path}
-                        onClick={() => url && setPreview({ url, name: a.proof_image_path?.split("/").pop() || a.applicant_type, bucket: "academic-records", path: a.proof_image_path! })}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge className="border-[#7B1113]/20 bg-[#7B1113]/5 text-[#7B1113]">{a.applicant_type}</Badge>
-                          <span className="text-xs font-bold text-[#241012]">{fullName(a.student_accounts)}</span>
-                          <span className="text-[11px] text-[#8B7376]">({a.student_accounts?.student_number})</span>
-                          <strong className="text-xs text-[#7B1113]">{a.shs_gwa ?? a.college_gpa ?? ""}</strong>
-                        </div>
-                        <p className="mt-1 text-[11px] text-[#8B7376]">Submitted {formatDateTime(a.created_at)}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col gap-1.5">
-                        {url && (
-                          <a href={url} target="_blank" rel="noreferrer" className="rounded-xl px-3 py-1.5 text-center text-[11px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5">
-                            View
-                          </a>
-                        )}
-                        {url && (
-                          <button
-                            onClick={() => downloadOne(url, buildFileName("academic", a.student_accounts, a.proof_image_path))}
-                            disabled={dlBusy}
-                            className="rounded-xl border border-[#7B1113]/25 px-3 py-1.5 text-[11px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
-                          >
-                            Download
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteOne("academic", a.record_id, "academic-records", a.proof_image_path || "")}
-                          disabled={delBusyKey === `academic-${a.record_id}`}
-                          className="rounded-xl border border-red-200 px-3 py-1.5 text-[11px] font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
-                        >
-                          {delBusyKey === `academic-${a.record_id}` ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          </div>
 
-          {visibleChed.length > 0 && (
-            <section className="rounded-xl border border-[#241012]/[0.06] bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-[#241012]">ITR Submissions (CHED Forms)</h2>
-                <span className="rounded-full bg-[#7B1113]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#7B1113]">{visibleChed.length}</span>
-              </div>
-              <ul className="mt-4 space-y-3">
-                {visibleChed.map((c) => {
-                  const sa = c.scholarship_applications?.student_accounts;
-                  const url = c.income_tax_return ? fileUrls[c.income_tax_return] : undefined;
-                  return (
-                    <li key={c.ched_form_id} className="flex items-center gap-4 rounded-xl border border-[#241012]/[0.06] bg-[#FAF7F5]/50 p-3.5">
-                      <Thumb
-                        url={url}
-                        path={c.income_tax_return}
-                        onClick={() => url && c.income_tax_return && setPreview({ url, name: c.income_tax_return.split("/").pop() || "ITR", bucket: "itr-documents", path: c.income_tax_return })}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs font-bold text-[#241012]">{fullName(sa) || `${c.last_name || ""}, ${c.given_name || ""}`.replace(/^, |, $/g, "")}</span>
-                        <span className="ml-2 text-[11px] text-[#8B7376]">({c.student_id || sa?.student_number}) &middot; App #{c.application_id}</span>
-                        <p className="mt-1 text-[11px] text-[#241012]">
-                          &#127891; {c.scholarship_applications?.scholarship_programs?.scholarship_name || "\u2014"} &middot; &#8369;{Number(c.annual_income_family || 0).toLocaleString()}/yr
-                        </p>
-                        <p className="mt-0.5 text-[10px] text-[#8B7376]">Submitted {formatDateTime(c.created_at)}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col gap-1.5">
-                        {url && (
-                          <a href={url} target="_blank" rel="noreferrer" className="rounded-xl px-3 py-1.5 text-center text-[11px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5">
-                            View
-                          </a>
-                        )}
-                        {url && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#241012]/[0.07] bg-[#FAF7F5]/60 px-5 py-3">
+            {([["all", "All files"], ["itr", "ITR"], ["academic", "Academic Record"], ["support", "Support Document"]] as const).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setTypeFilter(k)}
+                className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${
+                  typeFilter === k
+                    ? "bg-[#7B1113] text-white shadow-sm"
+                    : "border border-[#241012]/10 bg-white text-[#6B5458] hover:bg-[#7B1113]/5"
+                }`}
+              >
+                {label} <span className={typeFilter === k ? "text-white/70" : "text-[#8B7376]"}>{k === "all" ? studentRows.length : kindCount(k)}</span>
+              </button>
+            ))}
+          </div>
+
+          {rows.length === 0 ? (
+            <p className="px-5 py-8 text-center text-xs text-[#8B7376]">No files match this filter.</p>
+          ) : (
+            <div className="max-h-[70vh] overflow-auto">
+              <table className="w-full min-w-[980px] border-collapse text-left text-[11px] text-[#241012]">
+                <thead className="sticky top-0 z-10 bg-[#FAF7F5] text-[10px] uppercase tracking-wide text-[#6B5458]">
+                  <tr>
+                    <th className={`${cellCls} w-12 text-center font-bold`}>#</th>
+                    <th className={`${cellCls} font-bold`}>Student ID</th>
+                    <th className={`${cellCls} font-bold`}>Full Name</th>
+                    <th className={`${cellCls} w-16 font-bold`}>Year</th>
+                    <th className={`${cellCls} font-bold`}>Type</th>
+                    <th className={`${cellCls} font-bold`}>Details</th>
+                    <th className={`${cellCls} font-bold`}>Uploaded</th>
+                    <th className={`${cellCls} w-56 font-bold`}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={r.key} className={i % 2 ? "bg-[#FAF7F5]/60" : "bg-white"}>
+                      <td className={`${cellCls} text-center font-bold text-[#6B5458]`}>{i + 1}</td>
+                      <td className={`${cellCls} whitespace-nowrap font-semibold`}>{r.studentNumber}</td>
+                      <td className={`${cellCls} whitespace-nowrap font-bold text-[#241012]`}>{r.name}</td>
+                      <td className={`${cellCls} whitespace-nowrap text-center`}>{r.year}</td>
+                      <td className={cellCls}>
+                        <Badge className={KIND_META[r.kind].cls}>{KIND_META[r.kind].label}</Badge>
+                      </td>
+                      <td className={`${cellCls} max-w-[320px] truncate text-[#6B5458]`} title={r.details}>
+                        {r.details}
+                      </td>
+                      <td className={`${cellCls} whitespace-nowrap text-[#6B5458]`}>{formatDateTime(r.uploaded)}</td>
+                      <td className={cellCls}>
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => downloadOne(url, buildFileName("itr", sa, c.income_tax_return))}
-                            disabled={dlBusy}
-                            className="rounded-xl border border-[#7B1113]/25 px-3 py-1.5 text-[11px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:opacity-50"
+                            onClick={() => r.url && setPreview({ url: r.url, name: r.path.split("/").pop() || KIND_META[r.kind].label, bucket: r.bucket, path: r.path })}
+                            disabled={!r.url}
+                            className="rounded-md bg-[#7B1113] px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-[#540111] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => r.url && downloadOne(r.url, r.fileLabel)}
+                            disabled={!r.url || dlBusy}
+                            className="rounded-md border border-[#7B1113]/25 px-2.5 py-1 text-[10px] font-bold text-[#7B1113] transition hover:bg-[#7B1113]/5 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             Download
                           </button>
-                        )}
-                        <button
-                          onClick={() => deleteOne("itr", c.ched_form_id, "itr-documents", c.income_tax_return || "")}
-                          disabled={delBusyKey === `itr-${c.ched_form_id}`}
-                          className="rounded-xl border border-red-200 px-3 py-1.5 text-[11px] font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
-                        >
-                          {delBusyKey === `itr-${c.ched_form_id}` ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
+                          <button
+                            onClick={() => deleteOne(r.kind, r.deleteId, r.bucket, r.path)}
+                            disabled={delBusyKey === r.key}
+                            className="rounded-md border border-red-200 px-2.5 py-1 text-[10px] font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                          >
+                            {delBusyKey === r.key ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#241012]/[0.07] bg-[#FAF7F5] px-5 py-2.5 text-[10px] text-[#6B5458]">
+            <span>Support documents <b className="text-[#7B1113]">{kindCount("support")}</b></span>
+            <span>Academic records <b className="text-[#7B1113]">{kindCount("academic")}</b></span>
+            <span>ITR submissions <b className="text-[#7B1113]">{kindCount("itr")}</b></span>
+            <span className="ml-auto">Files ready <b className="text-[#7B1113]">{allDownloadable.length}</b> of {rows.length} shown</span>
+          </div>
+        </div>
       )}
 
       {preview && (

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import { getSupabase } from "@/lib/supabase/browser";
 import { queryRegistrar } from "@/lib/supabase/registrar";
 import { PROGRAMS, YEAR_LEVELS } from "@/lib/constants";
@@ -99,6 +100,7 @@ export default function RegisterPage() {
   const [success, setSuccess] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -123,6 +125,7 @@ export default function RegisterPage() {
     if (!form.password) { setError("Please enter a password."); return false; }
     if (form.password.length < 8) { setError("Password must contain at least 8 characters."); return false; }
     if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return false; }
+    if (!agreeTerms) { setError("Please read and agree to the Terms and Conditions of the system before creating your account."); return false; }
     return true;
   };
 
@@ -246,8 +249,10 @@ export default function RegisterPage() {
 
       if (isVerified) {
         setSuccess("Your account has been created and verified against the Registrar — student number matched. You can now log in and apply for scholarships.");
+        toast.success("Account created and verified against the Registrar. Redirecting to login...");
       } else {
         setSuccess("Your account has been created. Your student number was not found in the Registrar database — you can still log in, but you must contact the admin to be verified before applying for scholarships.");
+        toast.success("Account created. Please contact the admin to be verified.");
       }
       setTimeout(() => router.push("/login"), 2500);
     } catch (err: unknown) {
@@ -391,6 +396,34 @@ export default function RegisterPage() {
 
             <div className="mt-8 border-t border-[#241012]/[0.06] pt-6">
               <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={agreeTerms}
+                  disabled={registering}
+                  onChange={(e) => { setAgreeTerms(e.target.checked); setError(""); }}
+                  className="mt-0.5 h-4 w-4 accent-[#7B1113]"
+                />
+                <span className="text-xs leading-relaxed text-[#6B5458]">
+                  I have read and agree to the{" "}
+                  <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-bold text-[#7B1113] underline underline-offset-2 hover:brightness-110"
+                  >
+                    Terms and Conditions
+                  </Link>{" "}
+                  of the ISEWM Scholarship System &mdash; including the OCR verification of my uploaded ITR, the
+                  automated financial-need ranking, and the privacy of the data I submit.
+                </span>
+              </label>
+              {!agreeTerms && (
+                <p className="ml-7 mt-1 text-[11px] font-semibold text-[#7B1113]">
+                  Required: you must agree to the Terms and Conditions to create your account.
+                </p>
+              )}
+              <label className="mt-3 flex cursor-pointer items-start gap-3">
                 <input type="checkbox" required disabled={registering} className="mt-0.5 h-4 w-4 accent-[#7B1113]" />
                 <span className="text-xs leading-relaxed text-[#6B5458]">I confirm that the information I provided is accurate and matches my registered student record.</span>
               </label>

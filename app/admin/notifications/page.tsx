@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -123,6 +124,7 @@ export default function NotificationsPage() {
       ? `all ${rows.length} student(s)`
       : `${recipientName?.last_name || ""}, ${recipientName?.given_name || "student"}`;
     setMessage({ type: "ok", text: `Notification sent to ${target}.` });
+    toast.success(`Notification sent to ${target}.`);
     setForm({ student_id: "", title: "", message: "", notification_type: "Announcement" });
     refreshNotifications();
   }
@@ -137,6 +139,7 @@ export default function NotificationsPage() {
       date_sent: formatDateTime(n.date_sent),
     })));
     setMessage({ type: "ok", text: `Exported ${notifications.length} notification(s) as CSV.` });
+    toast.success(`Exported ${notifications.length} notification(s) as CSV.`);
   }
 
   async function deleteNotification(id: number) {
@@ -152,6 +155,7 @@ export default function NotificationsPage() {
     }
     setNotifications((prev) => prev.filter((n) => n.notification_id !== id));
     setMessage({ type: "ok", text: "Notification deleted." });
+    toast.success("Notification deleted.");
   }
 
   const totalPages = Math.max(1, Math.ceil(notifications.length / PAGE_SIZE));

@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -229,6 +230,7 @@ export default function ManageProgramsPage() {
     const { data } = await sb.from("scholarship_programs").select("*").order("created_at", { ascending: false });
     if (data) setPrograms(data);
     setMessage(`Updated "${name}" — ${ordered.length} requirement(s) checked.`);
+    toast.success(`Updated "${name}" — ${ordered.length} requirement(s) checked.`);
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -351,6 +353,7 @@ export default function ManageProgramsPage() {
     if (!rows.length) { setMessage("No applications yet for this scholarship."); return; }
     downloadCsv(`${name.replace(/[^\w]+/g, "_").toLowerCase()}-applications.csv`, rows);
     setMessage(`Exported ${rows.length} application form(s) for "${name}".`);
+    toast.success(`Exported ${rows.length} application form(s) for "${name}".`);
   }
 
   function exportAllProgramsCsv() {
@@ -358,6 +361,7 @@ export default function ManageProgramsPage() {
     if (!all.length) { setMessage("No applications found yet."); return; }
     downloadCsv("all-scholarship-applications.csv", all);
     setMessage(`Exported ${all.length} application form(s) across all scholarships.`);
+    toast.success(`Exported ${all.length} application form(s) across all scholarships.`);
   }
 
   if (loading) return <Spinner label="Loading programs..." color="maroon" />;

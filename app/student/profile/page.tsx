@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -163,6 +164,7 @@ export default function StudentProfilePage() {
 
     setAccount({ ...account, ...updates });
     setProfileMsg("Profile updated successfully.");
+    toast.success("Profile updated successfully.");
     setEditing(false);
   }
 
@@ -235,6 +237,7 @@ export default function StudentProfilePage() {
 
     form.reset();
     setProfileMsg("Academic record submitted successfully.");
+    toast.success("Academic record submitted successfully.");
     await refreshAcads();
   }
 
@@ -297,6 +300,7 @@ export default function StudentProfilePage() {
     }
 
     setProfileMsg(`${docType} uploaded successfully.`);
+    toast.success(`${docType} uploaded successfully.`);
     await refreshDocs();
   }
 

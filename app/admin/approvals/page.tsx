@@ -1,4 +1,5 @@
 "use client";
+import toast from "react-hot-toast";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -238,6 +239,7 @@ export default function ApprovalsPage() {
         a.application_id === approval.application_id ? { ...a, validation_status: "Validated" } : a
       ));
       setMessage("Student found and enrolled in the Registrar database. Marked as Validated.");
+      toast.success("Student found and enrolled in the Registrar database. Marked as Validated.");
     } else {
       const { error } = await sb
         .from("scholarship_approval")
@@ -270,6 +272,7 @@ export default function ApprovalsPage() {
     if (!rows.length) return;
     downloadCsv(`approved-scholar-${approval.application_id}.csv`, rows);
     setMessage("Exported this scholar's approval record as CSV.");
+    toast.success("Exported this scholar's approval record as CSV.");
   }
 
   function exportCsv() {
@@ -288,6 +291,7 @@ export default function ApprovalsPage() {
       };
     }));
     setMessage(`Exported ${approvedEntries.length} approved scholar(s) as CSV.`);
+    toast.success(`Exported ${approvedEntries.length} approved scholar(s) as CSV.`);
   }
 
   const viewingAppr = approvals.find((a) => a.application_id === viewingId) || null;
