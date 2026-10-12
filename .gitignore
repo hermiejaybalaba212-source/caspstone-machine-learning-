@@ -81,3 +81,4 @@ __pycache__/
 ml/models/
 .vercel
 .env*
+devlog.txt
