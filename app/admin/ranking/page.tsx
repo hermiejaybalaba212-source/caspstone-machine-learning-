@@ -107,6 +107,7 @@ interface TrainInfo {
   n_samples: number;
   n_real: number;
   n_synthetic: number;
+  n_csv?: number;
   n_trees: number;
   seed: number;
   accuracy: number;
@@ -859,6 +860,7 @@ export default function MLRankingPage() {
                 <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">Model</span>
                 <span>
                   <b className="text-[#241012]">{trainInfo.n_trees}</b> trees &middot; {trainInfo.n_samples} rows
+                  {trainInfo.n_csv ? ` (${trainInfo.n_csv} CSV)` : ""}
                 </span>
                 <span className="text-[#D3C8C4]">|</span>
                 {Object.entries(trainInfo.feature_importance)

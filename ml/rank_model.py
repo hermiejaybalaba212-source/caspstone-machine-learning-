@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from . import config as _config
+from . import csv_data as _csv_data
 from . import features as _features
 
 
@@ -78,7 +79,8 @@ def train(
 
     started = time.time()
     synth = _synthetic_rows(n_synth, seed)
-    rows = synth + list(real_rows)
+    csv_rows, csv_warnings = _csv_data.load_training_csv()
+    rows = synth + csv_rows + list(real_rows)
 
     X, medians = _features.matrix(rows)
     y_cls = np.array(
@@ -158,6 +160,8 @@ def train(
         "n_samples": int(len(rows)),
         "n_real": int(len(real_rows)),
         "n_synthetic": int(len(synth)),
+        "n_csv": int(len(csv_rows)),
+        "csv_warnings": list(csv_warnings),
         "n_trees": int(n_trees),
         "seed": int(seed),
         "accuracy": round(float(accuracy_score(y_cls_test, cls_pred)), 4),

@@ -541,6 +541,13 @@ def main() -> int:
                 ML_WARM.wait(300)
             log(f"Training Random Forest ({n_trees} trees, seed {seed}) on {n_synth} synthetic + {len(rows)} real rows...")
             training = rank_model.train(rows, seed=seed, n_trees=n_trees, n_synth=n_synth)
+            if training.get("n_csv"):
+                log(
+                    f"Loaded {training['n_csv']} historical training row(s) from ml/training_data.csv "
+                    f"({training['n_samples']} rows total in the fit)."
+                )
+            for warning in training.get("csv_warnings") or []:
+                log(warning)
             emit(
                 {
                     "type": "train",

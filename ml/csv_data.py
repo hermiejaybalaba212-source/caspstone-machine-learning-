@@ -1,0 +1,190 @@
+"""Optional historical training data from ``ml/training_data.csv``.
+
+Drop a CSV next to this file and its rows join every training run alongside
+the seeded synthetic population and the current run's real applicants:
+
+    synthetic rows + csv rows + real applicant rows  ->  RandomForest fit
+
+Required column: annual income. Everything else is optional.
+
+    annual_income,year_level,sex,gwa,gpa,ocr_match_pct,has_itr
+    120000,3,Female,1.55,,99.2,yes
+    450000,1,Male,,3.10,88.0,no
+
+Header aliases are accepted (income, family_income, gender, grade, ...).
+Values may carry currency symbols and thousands separators
+("PHP 120,000.00" parses as 120000.0). Rows without a usable income are
+skipped and reported, never fatal.
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import math
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from . import config as _config
+from . import features as _features
+
+TRAINING_CSV = _config.ML_DIR / "training_data.csv"
+
+_ALIASES = {
+    "income": ("annual_income", "income", "family_income", "total_family_annual_income",
+               "family_annual_income", "yearly_income", "declared_income", "amount"),
+    "year_level": ("year_level", "year", "level", "grade_level", "year_lvl"),
+    "sex": ("sex", "gender"),
+    "gwa": ("gwa", "shs_gwa", "senior_high_gwa"),
+    "gpa": ("gpa", "college_gpa", "tertiary_gpa"),
+    "ocr_match_pct": ("ocr_match_pct", "ocr_match", "match_pct", "ocr_pct"),
+    "has_itr": ("has_itr", "itr", "has_itr_upload", "itr_uploaded"),
+    "student_name": ("student_name", "name", "full_name", "applicant"),
+}
+
+
+def _canonical(header: str) -> str:
+    return header.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _resolve(header_map: Dict[str, str]) -> Dict[str, Optional[str]]:
+    """canonical field -> actual CSV column name present in the file."""
+    resolved: Dict[str, Optional[str]] = {}
+    for field, names in _ALIASES.items():
+        resolved[field] = next((header_map[n] for n in names if n in header_map), None)
+    return resolved
+
+
+def _money(value) -> Optional[float]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    for token in ("php", "peso", "₱", "p", "per", "year", "annum", "annual"):
+        text = text.replace(token, "")
+    text = text.replace(",", "").replace(" ", "").strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
+def _num(value) -> Optional[float]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
+def _flag(value, default: bool) -> bool:
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in ("no", "n", "false", "0", "none", "-"):
+        return False
+    if text in ("yes", "y", "true", "1"):
+        return True
+    return default
+
+
+def row_from(record: Dict[str, str], resolved: Dict[str, Optional[str]]) -> Optional[Dict]:
+    """One CSV record -> the same feature-row shape the forests train on."""
+    raw_income = record.get(resolved["income"], "") if resolved["income"] else ""
+    income = _money(raw_income)
+    if income is None:
+        return None
+
+    gwa = _num(record.get(resolved["gwa"], "")) if resolved["gwa"] else None
+    gpa = _num(record.get(resolved["gpa"], "")) if resolved["gpa"] else None
+
+    year_text = record.get(resolved["year_level"], "") if resolved["year_level"] else ""
+    sex_text = record.get(resolved["sex"], "") if resolved["sex"] else ""
+
+    ocr_default = 100.0 if _flag(record.get(resolved["has_itr"], "") if resolved["has_itr"] else None, True) else 0.0
+    raw_pct = _num(record.get(resolved["ocr_match_pct"], "")) if resolved["ocr_match_pct"] else None
+    ocr_pct = float(min(max(raw_pct, 0.0), 100.0)) if raw_pct is not None else ocr_default
+
+    has_itr = 1.0 if _flag(record.get(resolved["has_itr"], "") if resolved["has_itr"] else None, True) else 0.0
+    if has_itr < 0.5:
+        ocr_pct = 0.0
+
+    row = {
+        "declared_income": income,
+        "financial_need_score": _features.financial_need_score(income),
+        "ocr_match_pct": round(ocr_pct, 2),
+        "income_log": _features.income_log(income),
+        "has_itr": has_itr,
+        "ocr_verified": 1.0 if ocr_pct > 0 else 0.0,
+        "year_level_num": _features.year_level_num(year_text),
+        "sex_code": _features.sex_code(sex_text),
+        "academic_norm": _features.academic_norm(gwa, gpa),
+        "source": "csv",
+    }
+    if math.isnan(row["academic_norm"]):
+        row["academic_norm"] = None
+    row["priority_target"] = _features.priority_target(row)
+    return row
+
+
+def load_training_csv(path: Optional[Path] = None) -> tuple[List[Dict], List[str]]:
+    """Read the CSV (if present). Returns (rows, warnings); never raises."""
+    csv_path = Path(path) if path else TRAINING_CSV
+    if not csv_path.is_file():
+        return [], []
+
+    warnings: List[str] = []
+    rows: List[Dict] = []
+    try:
+        text = csv_path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        return [], [f"training CSV unreadable: {exc}"]
+    if not text.strip():
+        return [], []
+
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+
+    reader = csv.reader(io.StringIO(text), dialect)
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], []
+
+    header_map = {_canonical(cell): cell for cell in header if cell.strip()}
+    resolved = _resolve(header_map)
+    if not resolved["income"]:
+        return [], [
+            "training CSV has no income column "
+            f"(accepted headers: {', '.join(_ALIASES['income'])})"
+        ]
+
+    for index, values in enumerate(reader, start=2):
+        if not any(cell.strip() for cell in values):
+            continue
+        record = {cell.strip(): value for cell, value in zip(header, values)}
+        row = row_from(record, resolved)
+        if row is None:
+            warnings.append(f"training CSV line {index}: skipped (no usable income)")
+            continue
+        rows.append(row)
+
+    return rows, warnings
+
+
+def load_count() -> int:
+    return len(load_training_csv()[0])
