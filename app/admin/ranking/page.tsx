@@ -576,11 +576,7 @@ export default function MLRankingPage() {
             ? `OCR scan finished in ${seconds}s \u2014 ${finalAnalytics?.income_detected ?? 0} of ${finalAnalytics?.documents_scanned ?? 0} ITR image(s) produced an income value.`
             : `Ranking complete in ${seconds}s \u2014 ${finalRows.length} applicant(s) prioritized. Rank 1 = most in need of financial assistance.`,
         );
-        toast.success(
-          mode === "scan"
-            ? `OCR scan finished in ${seconds}s \u2014 ${finalAnalytics?.income_detected ?? 0}/${finalAnalytics?.documents_scanned ?? 0} ITR income(s) read.`
-            : `Ranking complete in ${seconds}s \u2014 ${finalRows.length} applicant(s) ranked.`,
-        );
+
       }
       setElapsed(0);
     } catch (err: unknown) {
@@ -832,62 +828,60 @@ export default function MLRankingPage() {
 
       {(ocrAnalytics || trainInfo) && (
         <div className="rounded-2xl border border-[#241012]/[0.07] bg-white px-4 py-2.5 shadow-sm">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] leading-5 text-[#6B5458]">
-            {ocrAnalytics && (
-              <>
-                <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">OCR</span>
-                <span>
-                  <b className="text-[#241012]">{ocrAnalytics.documents_scanned}</b> ITRs
-                </span>
-                <span className="text-[#D3C8C4]">|</span>
-                <span title="ITR images where an income figure was detected">
-                  detected <b className="text-[#241012]">{ocrAnalytics.income_detected}/{ocrAnalytics.documents_scanned}</b>
-                </span>
-                <span className="text-[#D3C8C4]">|</span>
-                <span title="Typed income exactly matches the figure OCR read from the ITR">
-                  exact <b className="text-[#241012]">{ocrAnalytics.exact_matches}/{ocrAnalytics.comparable}</b>
-                </span>
-                <span className="text-[#D3C8C4]">|</span>
-                <span>
-                  drives need <b className="text-[#241012]">{docsFromItr}/{docsWithTypedIncome}</b>
-                  {docsCorrected > 0 ? ` (${docsCorrected} corrected)` : ""}
-                </span>
-                <span className="text-[#D3C8C4]">|</span>
-                <span title="How close the income the applicant typed is to the figure OCR read from the ITR">
-                  typed accuracy <b className="text-[#241012]">{pct(ocrAnalytics.typed_accuracy_pct ?? ocrAnalytics.avg_align_pct, 1)}</b>
-                </span>
-                <span className="text-[#D3C8C4]">|</span>
-                <span title="Average 0-100 financial-need score computed from the ITR income">
-                  avg need <b className="text-[#241012]">{ocrAnalytics.avg_need_score != null ? ocrAnalytics.avg_need_score.toFixed(1) : "\u2014"}</b>
-                </span>
-                <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[#7B1113]/[0.07] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#7B1113]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#7B1113]" />
-                  {ocrAnalytics.scan_seconds > 0 ? `${ocrAnalytics.scan_seconds.toFixed(1)}s` : "cached"}
-                </span>
-              </>
-            )}
-            {trainInfo && (
-              <>
-                <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">Model</span>
-                <span>
-                  <b className="text-[#241012]">{trainInfo.n_trees}</b> trees &middot; {trainInfo.n_samples} rows
-                  {trainInfo.n_csv ? ` (${trainInfo.n_csv} CSV)` : ""}
-                </span>
-                <span className="text-[#D3C8C4]">|</span>
-                {Object.entries(trainInfo.feature_importance)
-                  .filter(([, value]) => value >= 0.01)
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 2)
-                  .map(([name, value]) => (
-                    <span key={name} title="Share of the ranking decision carried by this factor">
-                      {name.replace(/_/g, " ")} <b className="text-[#241012]">{(value * 100).toFixed(0)}%</b>
-                    </span>
-                  ))}
-                <span className="text-[#D3C8C4]">|</span>
-                <span className="font-bold text-emerald-700">saved {"\u2713"}</span>
-              </>
-            )}
-          </div>
+          {ocrAnalytics && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] leading-5 text-[#6B5458]">
+              <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">OCR</span>
+              <span>
+                <b className="text-[#241012]">{ocrAnalytics.documents_scanned}</b> ITRs
+              </span>
+              <span className="text-[#D3C8C4]">|</span>
+              <span title="ITR images where an income figure was detected">
+                detected <b className="text-[#241012]">{ocrAnalytics.income_detected}/{ocrAnalytics.documents_scanned}</b>
+              </span>
+              <span className="text-[#D3C8C4]">|</span>
+              <span title="Typed income exactly matches the figure OCR read from the ITR">
+                exact <b className="text-[#241012]">{ocrAnalytics.exact_matches}/{ocrAnalytics.comparable}</b>
+              </span>
+              <span className="text-[#D3C8C4]">|</span>
+              <span>
+                drives need <b className="text-[#241012]">{docsFromItr}/{docsWithTypedIncome}</b>
+                {docsCorrected > 0 ? ` (${docsCorrected} corrected)` : ""}
+              </span>
+              <span className="text-[#D3C8C4]">|</span>
+              <span title="How close the income the applicant typed is to the figure OCR read from the ITR">
+                typed accuracy <b className="text-[#241012]">{pct(ocrAnalytics.typed_accuracy_pct ?? ocrAnalytics.avg_align_pct, 1)}</b>
+              </span>
+              <span className="text-[#D3C8C4]">|</span>
+              <span title="Average 0-100 financial-need score computed from the ITR income">
+                avg need <b className="text-[#241012]">{ocrAnalytics.avg_need_score != null ? ocrAnalytics.avg_need_score.toFixed(1) : "\u2014"}</b>
+              </span>
+              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[#7B1113]/[0.07] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#7B1113]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#7B1113]" />
+                {ocrAnalytics.scan_seconds > 0 ? `${ocrAnalytics.scan_seconds.toFixed(1)}s` : "cached"}
+              </span>
+            </div>
+          )}
+          {trainInfo && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-[#241012]/[0.06] pt-2 text-[11px] leading-5 text-[#6B5458]">
+              <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">Model</span>
+              <span>
+                <b className="text-[#241012]">{trainInfo.n_trees}</b> trees &middot; {trainInfo.n_samples} rows
+                {trainInfo.n_csv ? ` (${trainInfo.n_csv} CSV)` : ""}
+              </span>
+              <span className="text-[#D3C8C4]">|</span>
+              {Object.entries(trainInfo.feature_importance)
+                .filter(([, value]) => value >= 0.01)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 2)
+                .map(([name, value]) => (
+                  <span key={name} title="Share of the ranking decision carried by this factor">
+                    {name.replace(/_/g, " ")} <b className="text-[#241012]">{(value * 100).toFixed(0)}%</b>
+                  </span>
+                ))}
+              <span className="text-[#D3C8C4]">|</span>
+              <span className="font-bold text-emerald-700">saved {"\u2713"}</span>
+            </div>
+          )}
           {trainInfo?.dataset && (
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#241012]/[0.06] pt-2 text-[11px] leading-5 text-[#6B5458]">
               <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">Dataset</span>
@@ -898,7 +892,7 @@ export default function MLRankingPage() {
               </span>
               {trainInfo.dataset.histogram && trainInfo.dataset.histogram.length > 0 && (
                 <span
-                  className="flex items-end gap-0.5"
+                  className="flex items-end gap-1"
                   title="Family-income distribution of every training row (per ₱100k bracket)"
                 >
                   {(() => {
@@ -907,15 +901,15 @@ export default function MLRankingPage() {
                     return hist.map((bin) => (
                       <span
                         key={bin.label}
-                        className="flex w-7 flex-col items-center gap-0.5"
+                        className="flex w-9 flex-col items-center gap-0.5"
                         title={`${bin.label}: ${bin.count} rows (${bin.pct}%)`}
                       >
                         <span className="text-[9px] font-semibold text-[#6B5458]">{bin.count}</span>
                         <span
                           className="w-full rounded-t bg-[#7B1113]/70"
-                          style={{ height: `${Math.max(3, Math.round((bin.pct / maxPct) * 18))}px` }}
+                          style={{ height: `${Math.max(4, Math.round((bin.pct / maxPct) * 26))}px` }}
                         />
-                        <span className="text-[8px] leading-none text-[#8B7376]">{bin.label}</span>
+                        <span className="whitespace-nowrap text-[8px] leading-none text-[#8B7376]">{bin.label}</span>
                       </span>
                     ));
                   })()}
