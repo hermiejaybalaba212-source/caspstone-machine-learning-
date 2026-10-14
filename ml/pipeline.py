@@ -19,6 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# NDJSON is UTF-8. On Windows the default stdout/stderr codecs are cp1252,
+# which cannot encode e.g. the peso sign in dataset labels - force UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
+
 from ml import cache as ocr_cache
 from ml import config as cfg
 from ml import features as ft

@@ -29,6 +29,7 @@ from . import config as _config
 from . import features as _features
 
 TRAINING_CSV = _config.ML_DIR / "training_data.csv"
+TRAINING_XLSX = _config.ML_DIR / "training_data.xlsx"
 
 _ALIASES = {
     "income": ("annual_income", "income", "family_income", "total_family_annual_income",
@@ -138,14 +139,29 @@ def row_from(record: Dict[str, str], resolved: Dict[str, Optional[str]]) -> Opti
     return row
 
 
-def load_training_csv(path: Optional[Path] = None) -> tuple[List[Dict], List[str]]:
-    """Read the CSV (if present). Returns (rows, warnings); never raises."""
-    csv_path = Path(path) if path else TRAINING_CSV
-    if not csv_path.is_file():
-        return [], []
+def _read_records(csv_path: Path) -> tuple[List[Dict[str, str]], List[str]]:
+    """Read CSV or Excel (.xlsx) into row dicts keyed by header text."""
+    if csv_path.suffix.lower() == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            return [], ["openpyxl is not installed - cannot read .xlsx (save the sheet as CSV instead)"]
+        try:
+            book = load_workbook(csv_path, read_only=True, data_only=True)
+            sheet = book.active
+            rows_iter = sheet.iter_rows(values_only=True)
+            header = ["" if cell is None else str(cell).strip() for cell in next(rows_iter, []) or []]
+            records: List[Dict[str, str]] = []
+            for values in rows_iter:
+                cells = ["" if cell is None else str(cell) for cell in values]
+                if not any(cell.strip() for cell in cells):
+                    continue
+                records.append({h: c for h, c in zip(header, cells) if h})
+            book.close()
+            return records, []
+        except OSError as exc:
+            return [], [f"training workbook unreadable: {exc}"]
 
-    warnings: List[str] = []
-    rows: List[Dict] = []
     try:
         text = csv_path.read_text(encoding="utf-8-sig")
     except OSError as exc:
@@ -164,22 +180,51 @@ def load_training_csv(path: Optional[Path] = None) -> tuple[List[Dict], List[str
         header = next(reader)
     except StopIteration:
         return [], []
+    header = [cell.strip() for cell in header]
 
-    header_map = {_canonical(cell): cell for cell in header if cell.strip()}
+    records = []
+    for values in reader:
+        if not any(cell.strip() for cell in values):
+            continue
+        records.append({h: c for h, c in zip(header, values) if h})
+    return records, []
+
+
+def load_training_csv(path: Optional[Path] = None) -> tuple[List[Dict], List[str]]:
+    """Read training_data.csv or training_data.xlsx (if present).
+
+    Returns (rows, warnings); never raises.
+    """
+    if path:
+        csv_path: Optional[Path] = Path(path)
+    elif TRAINING_CSV.is_file():
+        csv_path = TRAINING_CSV
+    elif TRAINING_XLSX.is_file():
+        csv_path = TRAINING_XLSX
+    else:
+        csv_path = None
+    if csv_path is None or not csv_path.is_file():
+        return [], []
+
+    records, warnings = _read_records(csv_path)
+    if warnings and not records:
+        return [], warnings
+    if not records:
+        return [], []
+
+    header_map = {_canonical(name): name for name in records[0].keys() if name.strip()}
     resolved = _resolve(header_map)
     if not resolved["income"]:
-        return [], [
-            "training CSV has no income column "
+        return [], warnings + [
+            "training data has no income column "
             f"(accepted headers: {', '.join(_ALIASES['income'])})"
         ]
 
-    for index, values in enumerate(reader, start=2):
-        if not any(cell.strip() for cell in values):
-            continue
-        record = {cell.strip(): value for cell, value in zip(header, values)}
+    rows: List[Dict] = []
+    for index, record in enumerate(records, start=2):
         row = row_from(record, resolved)
         if row is None:
-            warnings.append(f"training CSV line {index}: skipped (no usable income)")
+            warnings.append(f"training data line {index}: skipped (no usable income)")
             continue
         rows.append(row)
 

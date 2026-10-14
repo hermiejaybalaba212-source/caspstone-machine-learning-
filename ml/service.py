@@ -52,6 +52,8 @@ def _stream_pipeline(payload: dict) -> Iterator[str]:
         cwd=str(ML_DIR),
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
 

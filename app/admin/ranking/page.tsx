@@ -103,11 +103,22 @@ interface ScanAnalytics {
   cache_hits?: number;
 }
 
+interface TrainDataset {
+  sources: { synthetic: number; csv: number; real: number };
+  total: number;
+  with_income: number;
+  coverage: { has_itr: number; ocr_verified: number };
+  need_mean: number | null;
+  income?: { min: number; p25: number; median: number; p75: number; max: number; mean: number };
+  histogram?: Array<{ label: string; count: number; pct: number }>;
+}
+
 interface TrainInfo {
   n_samples: number;
   n_real: number;
   n_synthetic: number;
   n_csv?: number;
+  dataset?: TrainDataset;
   n_trees: number;
   seed: number;
   accuracy: number;
@@ -877,6 +888,54 @@ export default function MLRankingPage() {
               </>
             )}
           </div>
+          {trainInfo?.dataset && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#241012]/[0.06] pt-2 text-[11px] leading-5 text-[#6B5458]">
+              <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">Dataset</span>
+              <span title="Rows blended into this training run">
+                <b className="text-[#241012]">{trainInfo.dataset.total}</b> rows &middot;{" "}
+                {trainInfo.dataset.sources.synthetic} synth &middot; {trainInfo.dataset.sources.csv} CSV &middot;{" "}
+                {trainInfo.dataset.sources.real} real
+              </span>
+              {trainInfo.dataset.histogram && trainInfo.dataset.histogram.length > 0 && (
+                <span
+                  className="flex items-end gap-0.5"
+                  title="Family-income distribution of every training row (per ₱100k bracket)"
+                >
+                  {(() => {
+                    const hist = trainInfo.dataset.histogram!;
+                    const maxPct = Math.max(...hist.map((h) => h.pct), 1);
+                    return hist.map((bin) => (
+                      <span
+                        key={bin.label}
+                        className="flex w-7 flex-col items-center gap-0.5"
+                        title={`${bin.label}: ${bin.count} rows (${bin.pct}%)`}
+                      >
+                        <span className="text-[9px] font-semibold text-[#6B5458]">{bin.count}</span>
+                        <span
+                          className="w-full rounded-t bg-[#7B1113]/70"
+                          style={{ height: `${Math.max(3, Math.round((bin.pct / maxPct) * 18))}px` }}
+                        />
+                        <span className="text-[8px] leading-none text-[#8B7376]">{bin.label}</span>
+                      </span>
+                    ));
+                  })()}
+                </span>
+              )}
+              {trainInfo.dataset.income && (
+                <span title="Income quantiles across the training set (min / 25th percentile / median / 75th / max)">
+                  min <b className="text-[#241012]">₱{Math.round(trainInfo.dataset.income.min).toLocaleString()}</b> &middot; p25{" "}
+                  <b className="text-[#241012]">₱{Math.round(trainInfo.dataset.income.p25).toLocaleString()}</b> &middot; med{" "}
+                  <b className="text-[#241012]">₱{Math.round(trainInfo.dataset.income.median).toLocaleString()}</b> &middot; p75{" "}
+                  <b className="text-[#241012]">₱{Math.round(trainInfo.dataset.income.p75).toLocaleString()}</b> &middot; max{" "}
+                  <b className="text-[#241012]">₱{Math.round(trainInfo.dataset.income.max).toLocaleString()}</b>
+                </span>
+              )}
+              <span title="Training rows with an uploaded ITR / an OCR-read income figure">
+                ITR <b className="text-[#241012]">{trainInfo.dataset.coverage.has_itr}/{trainInfo.dataset.total}</b>
+                {" \u00b7 "}verified <b className="text-[#241012]">{trainInfo.dataset.coverage.ocr_verified}/{trainInfo.dataset.total}</b>
+              </span>
+            </div>
+          )}
         </div>
       )}
 

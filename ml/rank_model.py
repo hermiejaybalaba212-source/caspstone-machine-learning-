@@ -55,6 +55,82 @@ def _synthetic_rows(n: int, seed: int) -> List[Dict]:
     return rows
 
 
+def _income_of(row: Dict) -> Optional[float]:
+    for key in ("income_used", "declared_income", "ocr_income"):
+        value = row.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+_INCOME_BINS = (
+    (None, 100_000.0, "\u2264\u20b1100k"),
+    (100_000.0, 200_000.0, "\u20b1100\u2013200k"),
+    (200_000.0, 300_000.0, "\u20b1200\u2013300k"),
+    (300_000.0, 400_000.0, "\u20b1300\u2013400k"),
+    (400_000.0, 500_000.0, "\u20b1400\u2013500k"),
+    (500_000.0, 600_000.0, "\u20b1500\u2013600k"),
+    (600_000.0, None, ">\u20b1600k"),
+)
+
+
+def _dataset_analytics(synth: List[Dict], csv_rows: List[Dict], real_rows: List[Dict]) -> Dict:
+    """Distribution proof for the UI: sources, income histogram + quantiles."""
+    all_rows = list(synth) + list(csv_rows) + list(real_rows)
+    incomes: List[float] = []
+    needs: List[float] = []
+    has_itr = 0
+    verified = 0
+    for row in all_rows:
+        income = _income_of(row)
+        if income is None:
+            continue
+        incomes.append(income)
+        try:
+            needs.append(float(row.get("financial_need_score") or 0.0))
+        except (TypeError, ValueError):
+            pass
+        if row.get("has_itr"):
+            has_itr += 1
+        if row.get("ocr_verified"):
+            verified += 1
+
+    out: Dict = {
+        "sources": {"synthetic": len(synth), "csv": len(csv_rows), "real": len(real_rows)},
+        "total": len(all_rows),
+        "with_income": len(incomes),
+        "coverage": {"has_itr": has_itr, "ocr_verified": verified},
+        "need_mean": round(float(np.mean(needs)), 2) if needs else None,
+    }
+    if not incomes:
+        return out
+
+    arr = np.asarray(incomes, dtype=np.float64)
+    out["income"] = {
+        "min": round(float(arr.min()), 0),
+        "p25": round(float(np.percentile(arr, 25)), 0),
+        "median": round(float(np.median(arr)), 0),
+        "p75": round(float(np.percentile(arr, 75)), 0),
+        "max": round(float(arr.max()), 0),
+        "mean": round(float(arr.mean()), 0),
+    }
+    total = len(arr)
+    histogram = []
+    for low, high, label in _INCOME_BINS:
+        mask = np.ones(total, dtype=bool)
+        if low is not None:
+            mask &= arr > low
+        if high is not None:
+            mask &= arr <= high
+        count = int(mask.sum())
+        histogram.append({"label": label, "count": count, "pct": round(100.0 * count / total, 1)})
+    out["histogram"] = histogram
+    return out
+
+
 def train(
     real_rows: List[Dict],
     seed: int = _config.DEFAULT_SEED,
@@ -81,6 +157,7 @@ def train(
     synth = _synthetic_rows(n_synth, seed)
     csv_rows, csv_warnings = _csv_data.load_training_csv()
     rows = synth + csv_rows + list(real_rows)
+    dataset = _dataset_analytics(synth, csv_rows, real_rows)
 
     X, medians = _features.matrix(rows)
     y_cls = np.array(
@@ -162,6 +239,7 @@ def train(
         "n_synthetic": int(len(synth)),
         "n_csv": int(len(csv_rows)),
         "csv_warnings": list(csv_warnings),
+        "dataset": dataset,
         "n_trees": int(n_trees),
         "seed": int(seed),
         "accuracy": round(float(accuracy_score(y_cls_test, cls_pred)), 4),
