@@ -19,10 +19,22 @@ from . import config as _config
 AMOUNT_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+\.\d{1,2}")
 BARE_CURRENCY_RE = re.compile(r"(?<![\d.,])\d{4,9}(?![\d.,])")
 
-# Ordered by confidence in the meaning of the value we want.
+# Ordered by confidence in the meaning of the value we want. Covers every
+# Philippine BIR income-tax layout that scholarship ITRs commonly use:
+# 1701/1701A/1701Q (self-employed + mixed), 1700 (pure compensation),
+# 2316 (Certificate of Compensation Payment - the usual employee proof),
+# plus eFPS-generated printouts of the same forms.
 INCOME_KEYWORDS = [
+    # BIR Form 1701 - family summary block
     (re.compile(r"total\s*family\s*annual\s*income", re.I), True),
     (re.compile(r"total\s*family\s*income", re.I), True),
+    # BIR Form 2316 / 1700 - compensation summaries
+    (re.compile(r"total\s*gross\s*compensation\s*income", re.I), True),
+    (re.compile(r"gross\s*compensation\s*income", re.I), True),
+    (re.compile(r"total\s*compensation\s*income", re.I), True),
+    (re.compile(r"taxable\s*compensation\s*income", re.I), False),
+    (re.compile(r"annual\s*compensation\s*income", re.I), False),
+    # Generic totals (1701/1701A business pages, eFPS printouts)
     (re.compile(r"total\s*annual\s*income", re.I), True),
     (re.compile(r"total\s*income", re.I), True),
     (re.compile(r"family\s*annual\s*income", re.I), False),
@@ -30,9 +42,25 @@ INCOME_KEYWORDS = [
     (re.compile(r"gross\s*income", re.I), False),
     (re.compile(r"compensation\s*income", re.I), False),
     (re.compile(r"taxable\s*income", re.I), False),
+    (re.compile(r"total\s*net\s*income", re.I), False),
+    (re.compile(r"net\s*income", re.I), False),
+    (re.compile(r"total\s*business\s*income", re.I), False),
+    (re.compile(r"total\s*sales", re.I), False),
 ]
 
-IGNORE_RE = re.compile(r"page\s*\d|form\s*no|birt|date|schedule|part\s*[iv]+", re.I)
+IGNORE_RE = re.compile(
+    r"page\s*\d|form\s*no|birt|date|schedule|part\s*[iv]+|"
+    r"tax\s*due|tax\s*payable|amount\s*due|penalt|surcharge|advances",
+    re.I,
+)
+
+# Payment/due lines sit near income rows on BIR forms - their amounts must
+# never be mistaken for income (e.g. "TOTAL TAX DUE 12,500").
+DUE_RE = re.compile(
+    r"tax\s*due|tax\s*payable|amount\s*due|amount\s*payable|penalt|surcharge|"
+    r"interest\s*on\s|advances\s*from|credit\s*balance",
+    re.I,
+)
 
 # The form title is "ANNUAL INCOME TAX RETURN" - OCR often returns it glued
 # together ("ANNUALINCOMETAXRETURN"), which a naive "annual income" search
@@ -228,7 +256,13 @@ def extract_income(lines: List[dict], allow_fallback: bool = True) -> Optional[d
                 window.append(nxt)
 
             candidates: List[tuple] = []
+            due_offsets = {
+                i for i, win in enumerate(window) if DUE_RE.search(win["text"])
+            }
             for offset, win in enumerate(window):
+                # Skip tax-due/penalty rows AND the amount line under them.
+                if offset in due_offsets or (offset - 1) in due_offsets:
+                    continue
                 for value, raw in _amounts_in(win):
                     if value < 1000:
                         continue
