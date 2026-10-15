@@ -201,8 +201,76 @@ export default function MLRankingPage() {
   const [trainInfo, setTrainInfo] = useState<TrainInfo | null>(null);
   const [ranked, setRanked] = useState<RankedRow[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [histFile, setHistFile] = useState<{ name: string; size: number; updated_at?: string } | null>(null);
+  const [histBusy, setHistBusy] = useState(false);
+  const [histError, setHistError] = useState("");
+  const histInputRef = useRef<HTMLInputElement | null>(null);
 
   const logRef = useRef<HTMLDivElement | null>(null);
+
+  async function refreshHistFile() {
+    try {
+      const res = await fetch("/api/ml/training-data");
+      if (!res.ok) return;
+      const json = await res.json();
+      setHistFile(json.file || null);
+    } catch {
+      // non-fatal
+    }
+  }
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ml/training-data");
+        if (!res.ok || ignore) return;
+        const json = await res.json();
+        if (!ignore) setHistFile(json.file || null);
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => { ignore = true; };
+  }, []);
+
+  async function uploadHistFile(file: File) {
+    setHistBusy(true);
+    setHistError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/ml/training-data", { method: "POST", body });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Upload failed (${res.status})`);
+      await refreshHistFile();
+      setMessage(`Historical training file "${json.name}" saved. It will be blended into the next ranking run.`);
+      toast.success("Historical training data uploaded.");
+    } catch (err: unknown) {
+      setHistError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setHistBusy(false);
+      if (histInputRef.current) histInputRef.current.value = "";
+    }
+  }
+
+  async function removeHistFile() {
+    setHistBusy(true);
+    setHistError("");
+    try {
+      const res = await fetch("/api/ml/training-data", { method: "DELETE" });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || `Remove failed (${res.status})`);
+      }
+      setHistFile(null);
+      setMessage("Historical training file removed — the next ranking run uses the bundled sample only.");
+    } catch (err: unknown) {
+      setHistError(err instanceof Error ? err.message : "Remove failed.");
+    } finally {
+      setHistBusy(false);
+    }
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -597,18 +665,9 @@ export default function MLRankingPage() {
       align_pct: d.match?.align_pct ?? "",
       difference: d.match?.diff ?? "",
       confidence: d.confidence ?? "",
-      ocr_ms: d.ocr_ms ?? "",
-      text_lines: d.line_count ?? "",
       extraction_method: d.method ?? "",
-      anchor: d.anchor ?? "",
-      box_thresh: d.box_thresh ?? "",
-      attempts: d.attempts ?? "",
       cached: d.cached ? "yes" : "no",
-      skipped: d.skipped ?? "",
       error: d.error ?? "",
-      width_px: d.image?.width ?? "",
-      height_px: d.image?.height ?? "",
-      bytes: d.image?.bytes ?? "",
     })));
     setMessage(`Exported OCR audit CSV (${docs.length} file(s)).`);
     toast.success(`Exported OCR audit CSV (${docs.length} file(s)).`);
@@ -789,13 +848,6 @@ export default function MLRankingPage() {
         </button>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={exportOcrCsv}
-            disabled={!docs.length}
-            className="rounded-lg border border-[#7B1113]/30 px-4 py-2 text-xs font-bold text-[#7B1113] hover:bg-[#7B1113]/5 disabled:opacity-50"
-          >
-            Export OCR Audit CSV
-          </button>
-          <button
             onClick={exportChedFormsCsv}
             disabled={!chedForms.length}
             className="rounded-lg border border-[#7B1113]/30 px-4 py-2 text-xs font-bold text-[#7B1113] hover:bg-[#7B1113]/5 disabled:opacity-50"
@@ -823,6 +875,63 @@ export default function MLRankingPage() {
             <br />
             0% match or no ITR upload is placed after the verified group.
           </p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[#241012]/[0.07] bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#7B1113]">Historical training data</p>
+            <p className="mt-0.5 text-[11px] leading-5 text-[#6B5458]">
+              Upload the school&rsquo;s past scholarship applications (CSV or Excel). The Random Forest blends these
+              real records into training, alongside the synthetic sample and the live applicants.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={histInputRef}
+              type="file"
+              accept=".csv,.xlsx"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadHistFile(f);
+              }}
+            />
+            <button
+              onClick={() => histInputRef.current?.click()}
+              disabled={histBusy}
+              className="rounded-lg bg-[#7B1113] px-3.5 py-2 text-[11px] font-bold text-white hover:bg-[#540111] disabled:opacity-50"
+            >
+              {histBusy ? "Saving..." : histFile ? "Replace file" : "Upload CSV / Excel"}
+            </button>
+            {histFile && (
+              <button
+                onClick={removeHistFile}
+                disabled={histBusy}
+                className="rounded-lg border border-[#7B1113]/30 px-3.5 py-2 text-[11px] font-bold text-[#7B1113] hover:bg-[#7B1113]/5 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="mt-2 border-t border-[#241012]/[0.06] pt-2 text-[11px] leading-5 text-[#6B5458]">
+          {histError ? (
+            <span className="font-semibold text-red-600">{histError}</span>
+          ) : histFile ? (
+            <span>
+              Using <b className="text-[#241012]">{histFile.name}</b> ({Math.max(1, Math.round(histFile.size / 1024))} KB)
+              {histFile.updated_at ? ` \u00b7 updated ${new Date(histFile.updated_at).toLocaleDateString("en-PH")}` : ""}
+              {" \u00b7"} blended into every training run.
+            </span>
+          ) : (
+            <span>
+              No file uploaded yet &mdash; the bundled sample ({trainInfo?.n_csv ?? 20} rows) is used. Required column:
+              annual income (e.g. <code className="rounded bg-[#241012]/[0.05] px-1">annual_income</code>,
+              {" "}<code className="rounded bg-[#241012]/[0.05] px-1">family_income</code>).
+            </span>
+          )}
         </div>
       </div>
 

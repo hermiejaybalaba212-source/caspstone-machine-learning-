@@ -1,9 +1,17 @@
-"""Optional historical training data from ``ml/training_data.csv``.
+"""Optional historical training data from CSV / Excel.
 
-Drop a CSV next to this file and its rows join every training run alongside
-the seeded synthetic population and the current run's real applicants:
+Sources, in priority order:
 
-    synthetic rows + csv rows + real applicant rows  ->  RandomForest fit
+1. The school's uploaded file in the ``training-data`` Supabase Storage
+   bucket (``historical/training_data.csv`` or ``.xlsx``) — admins upload
+   real past scholarship applications from the Ranking page.
+2. ``ml/training_data.csv`` or ``ml/training_data.xlsx`` shipped with the
+   repo (small sample used when nothing is uploaded).
+
+Rows join every training run alongside the seeded synthetic population and
+the current run's real applicants:
+
+    synthetic rows + historical rows + real applicant rows -> RandomForest fit
 
 Required column: annual income. Everything else is optional.
 
@@ -22,6 +30,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -30,6 +39,8 @@ from . import features as _features
 
 TRAINING_CSV = _config.ML_DIR / "training_data.csv"
 TRAINING_XLSX = _config.ML_DIR / "training_data.xlsx"
+STORAGE_BUCKET = "training-data"
+STORAGE_PREFIX = "historical/"
 
 _ALIASES = {
     "income": ("annual_income", "income", "family_income", "total_family_annual_income",
@@ -190,45 +201,88 @@ def _read_records(csv_path: Path) -> tuple[List[Dict[str, str]], List[str]]:
     return records, []
 
 
+def _download_uploaded() -> Optional[Path]:
+    """Fetch the admin-uploaded historical file from Supabase Storage.
+
+    Returns a local temp path (.csv or .xlsx) or None when nothing is
+    uploaded / storage is unreachable. Never raises.
+    """
+    try:
+        from . import storage as _storage
+    except Exception:
+        return None
+    try:
+        files = _storage.list_all(STORAGE_BUCKET, STORAGE_PREFIX)
+    except Exception:
+        return None
+    target = next(
+        (f for f in files if f["path"].lower().endswith((".csv", ".xlsx"))),
+        None,
+    )
+    if not target:
+        return None
+    try:
+        data = _storage.download(STORAGE_BUCKET, target["path"])
+    except Exception:
+        return None
+    suffix = ".xlsx" if target["path"].lower().endswith(".xlsx") else ".csv"
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="historical_")
+    handle.write(data)
+    handle.close()
+    return Path(handle.name)
+
+
 def load_training_csv(path: Optional[Path] = None) -> tuple[List[Dict], List[str]]:
-    """Read training_data.csv or training_data.xlsx (if present).
+    """Read the historical training file (uploaded, or the bundled sample).
 
     Returns (rows, warnings); never raises.
     """
+    temp_path: Optional[Path] = None
     if path:
         csv_path: Optional[Path] = Path(path)
-    elif TRAINING_CSV.is_file():
-        csv_path = TRAINING_CSV
-    elif TRAINING_XLSX.is_file():
-        csv_path = TRAINING_XLSX
     else:
-        csv_path = None
-    if csv_path is None or not csv_path.is_file():
-        return [], []
+        temp_path = _download_uploaded()
+        if temp_path is not None:
+            csv_path = temp_path
+        elif TRAINING_CSV.is_file():
+            csv_path = TRAINING_CSV
+        elif TRAINING_XLSX.is_file():
+            csv_path = TRAINING_XLSX
+        else:
+            csv_path = None
+    try:
+        if csv_path is None or not csv_path.is_file():
+            return [], []
 
-    records, warnings = _read_records(csv_path)
-    if warnings and not records:
-        return [], warnings
-    if not records:
-        return [], []
+        records, warnings = _read_records(csv_path)
+        if warnings and not records:
+            return [], warnings
+        if not records:
+            return [], []
 
-    header_map = {_canonical(name): name for name in records[0].keys() if name.strip()}
-    resolved = _resolve(header_map)
-    if not resolved["income"]:
-        return [], warnings + [
-            "training data has no income column "
-            f"(accepted headers: {', '.join(_ALIASES['income'])})"
-        ]
+        header_map = {_canonical(name): name for name in records[0].keys() if name.strip()}
+        resolved = _resolve(header_map)
+        if not resolved["income"]:
+            return [], warnings + [
+                "training data has no income column "
+                f"(accepted headers: {', '.join(_ALIASES['income'])})"
+            ]
 
-    rows: List[Dict] = []
-    for index, record in enumerate(records, start=2):
-        row = row_from(record, resolved)
-        if row is None:
-            warnings.append(f"training data line {index}: skipped (no usable income)")
-            continue
-        rows.append(row)
+        rows: List[Dict] = []
+        for index, record in enumerate(records, start=2):
+            row = row_from(record, resolved)
+            if row is None:
+                warnings.append(f"training data line {index}: skipped (no usable income)")
+                continue
+            rows.append(row)
 
-    return rows, warnings
+        return rows, warnings
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
 def load_count() -> int:
